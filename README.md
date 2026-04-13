@@ -431,7 +431,7 @@ If you use this code or experimental design in your work, please cite:
 @article{pandey2025scl,
   title   = {Semantic Channel Learning: Byzantine-Robust Split Federated Learning
              over Semantic Wireless Channels},
-  author  = {Pandey, Ishaan},
+  author  = {Shaurya, Satyam},
   journal = {IEEE Journal on Selected Areas in Communications},
   year    = {2025},
   note    = {Code: \url{https://github.com/ispandey/scl-experiment}}
@@ -442,4 +442,4 @@ If you use this code or experimental design in your work, please cite:
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License — copyright © 2025 Satyam Shaurya — see the [LICENSE](LICENSE) file for details.
