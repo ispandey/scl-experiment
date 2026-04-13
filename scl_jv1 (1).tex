@@ -1,0 +1,1465 @@
+\documentclass[10pt,journal]{IEEEtran}
+\usepackage{amsmath, amssymb, amsfonts, graphicx, cite, algorithm, algorithmic, braket}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{inputenc}
+\usepackage{xcolor}
+\usepackage{amsthm}
+\usepackage{xspace}
+\newcommand{\hinge}[1]{\left[ #1 \right]_+}
+\usepackage{balance}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}{Corollary}
+\newtheorem{remark}{Remark}
+\setlength{\columnsep}{0.25in}  % Or slightly more, e.g., 0.22in for safety
+\addtolength{\topmargin}{+0.2cm}
+ \usepackage[left=0.680in,right=0.635in,top=0.7in,bottom=0.97in]{geometry}
+\setlength{\abovedisplayskip}{2.5pt}
+\setlength{\belowdisplayskip}{2.5pt}
+\setlength{\abovedisplayshortskip}{2.5pt}
+\setlength{\belowdisplayshortskip}{2.5pt}
+\setlength{\abovedisplayskip}{2.5pt}
+\setlength{\belowdisplayskip}{2.5pt}
+\setlength{\abovedisplayshortskip}{2.5pt}
+\setlength{\belowdisplayshortskip}{2.5pt}
+\allowdisplaybreaks 
+\IEEEoverridecommandlockouts
+
+\title{Semantic Channel Learning for Wireless Edge Intelligence: A Semantic Capacity Framework for Robust Split Federated Learning over Fading Channels
+\vspace{-0.3em}
+}
+\author{
+
+Satyam~Shaurya,
+Sudip~Biswas,
+Angshuman~Jana,
+and~Tharmalingam~Ratnarajah
+%
+\thanks{Satyam Shaurya and Angshuman Jana are with the Department of Computer Science and Engineering, Indian Institute of Information Technology Guwahati, India.}
+%
+\thanks{Sudip Biswas is with the Department of Electronics and Communication Engineering, Indian Institute of Information Technology Guwahati, India.}
+%
+\thanks{Tharmalingam Ratnarajah is with the Department of Electrical and Computer Engineering, San Diego State University, USA.}\vspace{-2.5em}
+}
+
+% ---------------------------------------------------------
+\begin{document}
+\maketitle
+\begin{abstract}
+Distributed machine learning (DML) is rapidly moving to wireless edge environments, where resource-constrained devices collaboratively train models on decentralized data. Split federated learning (SFL) is attractive in this setting because it reduces on-device computation by partitioning neural networks between clients and servers. However, most SFL designs still assume reliable links and treat communication as a separate transport layer. In realistic wireless settings with fading, noise, and interference, this separation can distort intermediate representations and degrade learning performance. To address this gap, we propose semantic channel learning (SCL), a communication-aware framework that models intermediate SFL representations as semantic information flows and incorporates channel dynamics directly into the training process. We introduce an information-theoretic view of this interaction and define semantic capacity, i.e., the maximum receiver-side task-relevant information sustainable under channel constraints. We derive robustness and convergence bounds under SNR-dependent perturbations and analyze channel-induced gradient bias. Experimentally, we report two protocols: (i) a full-training CIFAR-10 setting used for the primary robustness analysis, and (ii) a short-budget setting used for reproducibility stress tests and hypothesis testing. The full protocol shows clear attack-defense separation and high semantic fidelity, while the short-budget protocol yields statistically non-significant differences among communication variants ($p\approx0.062$), clarifying when SCL gains are and are not observable. Supplementary MNIST trends are included as cross-dataset sanity checks. Overall, SCL provides a unified co-design perspective while explicitly stating empirical scope and limitations for wireless edge intelligence.
+\end{abstract}
+% ---------------------------------------------------------
+\begin{IEEEkeywords}
+Split federated learning, wireless learning systems,
+semantic communications, information bottleneck,
+6G edge intelligence, distributed machine learning
+\end{IEEEkeywords}
+% ---------------------------------------------------------
+\section{Introduction}
+
+The rapid proliferation of intelligent edge devices has increased the need for distributed machine learning (ML) under tight computation and communication budgets\cite{8736011,8876870,9042352}. Federated learning (FL) enables collaborative model training without sharing raw data\cite{mcmahan2023communicationefficientlearningdeepnetworks,kairouz2021advancesopenproblemsfederated,9205981}, but training full deep models on-device remains costly. To reduce this burden, split federated learning (SFL) partitions the network between clients and a server, allowing clients to execute only early layers\cite{thapa2022splitfedfederatedlearningmeets,li2020federatedoptimizationheterogeneousnetworks,9060868,10255264}.
+In SFL, clients transmit intermediate activations (smashed data) to the server for downstream computation and aggregation\cite{vepakomma2018splitlearninghealthdistributed}. Although this improves scalability, many SFL frameworks still assume near-ideal communication links\cite{10741277}. Real wireless channels are affected by fading, noise, interference, and bandwidth limits\cite{Goldsmith_2005,Tse_Viswanath_2005,9014530,11119144}, which can distort transmitted representations and degrade training reliability and convergence\cite{11134601}.
+As edge intelligence evolves toward sixth-generation (6G) wireless systems, treating learning and communication as decoupled layers becomes increasingly inadequate\cite{8839651,8454325}. Bit-level communication reliability alone does not explain how channel perturbations affect task-relevant representations inside deep models, which motivates joint communication-learning design where channel behavior is treated as a first-class factor in model performance\cite{9398576,10183789}. 
+
+This aligns with semantic communications, which emphasize transmitting task-relevant meaning rather than exact bit-level replicas\cite{9398576,2022arXiv220101389Q,8792135}. In SFL, smashed data can be viewed as compressed semantic embeddings of the input\cite{9398576}; once these embeddings traverse a wireless channel, fading and noise act directly on the information used for downstream learning, not just on raw symbols\cite{10798108}. Therefore, understanding how channel perturbations affect representation quality and convergence is essential for building robust distributed learning systems\cite{8839651}.
+Compared with recent semantic communication enabled FL studies, SCL jointly treats three components that are often optimized separately: (i) split representation perturbation over fading wireless links, (ii) receiver side semantic utility via $I(\tilde{Z};Y)$ and semantic capacity, and (iii) Byzantine robust aggregation under semantically biased updates. Existing wireless FL works primarily emphasize communication efficiency and reliability\cite{8736011,11134601,11119144}, while semantic communication works primarily emphasize task-aware transmission quality\cite{9398576,10798108}. Our contribution is a unified channel semantics robustness formulation and validation within one SFL training pipeline\cite{10741277}.
+
+To formalize this coupling, we model transmitted smashed data as latent codes under the information bottleneck view\cite{tishby2000informationbottleneckmethod,9082644}:
+
+\begin{equation}
+\begin{aligned}
+Z&=f_c(X;\theta_c), \\
+\tilde{Z}&=Z+\epsilon, \\
+\epsilon&\sim\mathcal{CN}\!\left(0,\frac{\alpha}{1+\mathrm{SNR}}I\right).
+\end{aligned}
+\end{equation}
+The resulting channel-aware risk is
+\begin{equation}
+\mathcal{R}(\theta_c,\theta_s)=\mathbb{E}\!\left[\ell\big(f_s(\tilde{Z};\theta_s),Y\big)\right],
+\end{equation}
+and the semantic capacity of learning systems is defined as
+\begin{equation}
+C_s \triangleq \max I(\tilde{Z};Y)
+\quad
+\text{s.t.}
+\quad
+I(X;Z)\le C,
+\end{equation}
+where $C$ is Shannon capacity\cite{6773024}. Hence, bit-level reliability and task-level reliability are coupled but not identical. In this revision, we report primary CIFAR-10 results and supplementary MNIST sanity checks, and we explicitly separate full-training conclusions from short-budget reproducibility observations.
+
+The contributions of this paper are as follows:
+
+\begin{itemize}
+
+\item Semantic channel learning framework:
+We propose semantic channel learning (SCL), a communication aware split federated learning framework that incorporates wireless channel dynamics directly into training.
+\item Semantic capacity of learning systems:
+We introduce semantic capacity as an information-theoretic measure of how much task-relevant information can be transmitted reliably under channel constraints.
+\item Information bottleneck formulation for wireless learning:
+We connect split representation learning to the information bottleneck principle under channel perturbations and provide an implementable variational proxy for the mutual-information terms used in training.
+\item Theoretical analysis of channel-aware learning:
+We derive robustness and convergence guarantees, and clarify that these are worst-case bounds whose tightness depends on problem-specific constants.
+\item Bias-aware robustness insight:
+We prove channel-induced gradient distortion, i.e., $\mathbb{E}[\nabla \tilde{\mathcal{L}}] \neq \nabla \mathcal{L}$ in general, and provide a counterexample showing why the classical Byzantine threshold $f<\frac{N}{2}$ can be insufficient under systematic semantic bias.
+\item Protocol-matched empirical evaluation:
+We include direct protocol-matched comparisons against semantic/digital/no-channel baselines, report hypothesis-test outcomes, and distinguish statistically supported findings from non-significant trends.
+\end{itemize}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Related Work}
+Recent years have seen rapid progress in distributed learning, wireless edge intelligence, and semantic communications\cite{9060868,8839651,10798108}. However, these directions are still mostly optimized in isolation\cite{10741277}. A simplified view is
+\begin{equation}
+\begin{aligned}
+\text{FL/SFL:}\quad &\min_{\theta}\sum_{k=1}^{K}p_kF_k(\theta), \\
+\text{Semantic communication:}\quad &\max I(Z;Y)\;\text{s.t.}\;I(X;Z)\le C.
+\end{aligned}
+\end{equation}
+This framing leaves limited treatment of channel-aware representation learning in SFL.
+\subsection{Federated and split learning}
+FL enables collaborative training without sharing raw data, with FedAvg as the canonical baseline\cite{mcmahan2023communicationefficientlearningdeepnetworks}. Later works improved heterogeneity handling, communication efficiency, and robustness\cite{kairouz2021advancesopenproblemsfederated,9205981}. To reduce client computation, SL and SFL split models across client and server and exchange intermediate activations\cite{vepakomma2018splitlearninghealthdistributed,thapa2022splitfedfederatedlearningmeets}. Most SFL formulations still assume reliable links, so the impact of channel distortions on smashed representations remains under-modeled\cite{10741277}.
+\subsection{Wireless edge intelligence}
+Wireless edge intelligence studies communication-constrained training in practical radio settings\cite{8839651}. Representative methods include gradient compression, adaptive scheduling, and over-the-air aggregation\cite{8736011}, alongside channel-aware controls such as power/resource adaptation\cite{11134601,11119144}. These works significantly improve efficiency and reliability but typically treat the channel as an external system constraint rather than part of the representation-learning objective.
+\subsection{Semantic communications}
+Semantic communications shift optimization from bit-level fidelity to task-relevant information\cite{9398576,2022arXiv220101389Q}. Deep semantic encoders/decoders have demonstrated large bandwidth savings across vision and speech tasks\cite{9398576,10798108}. Foundational task-oriented and deep-JSCC studies, including task-oriented edge inference, wireless image retrieval at the edge, and deep joint source-channel coding for images\cite{shao2021taskoriented,jankowski2021wirelessretrieval,bourtsoulatze2019deepjscc}, further establish that task utility can remain stable even when symbol-level distortion changes. Yet, direct integration of semantic communication with SFL training dynamics is still limited, despite smashed data being a natural semantic latent.
+\begin{figure*}[htbp]
+\centering
+\includegraphics[width=15cm]{\detokenize{SCL figures/Diagrams/scl system model_v3.png}}
+\caption{End-to-end semantic channel learning (SCL) architecture, jointly optimizing split representation encoding, fading-channel transmission, and robust server-side aggregation for reliable wireless edge intelligence.}
+\label{fig:Semantic Channel Learning Architecture}
+\end{figure*}
+\subsection{Research gap}
+Existing FL/SFL pipelines primarily optimize
+\begin{equation}
+\min_{\theta_c,\theta_s}\sum_{k=1}^{K}\mathbb{E}_{(x,y)\sim\mathcal{D}_k}\left[\ell\big(f_s(f_c(x;\theta_c);\theta_s),y\big)\right],
+\end{equation}
+assuming reliable links\cite{9060868,thapa2022splitfedfederatedlearningmeets}, whereas wireless-learning methods emphasize communication efficiency without explicit semantic preservation\cite{8736011,9042352}.
+To bridge this gap, SCL adopts the channel-aware objective
+\begin{equation}
+\min_{\theta_c,\theta_s}\sum_{k=1}^{K}\mathbb{E}_{(x,y)\sim\mathcal{D}_k,\,\epsilon_k}\left[\ell\big(f_s(f_c(x;\theta_c)+\epsilon_k;\theta_s),y\big)\right],
+\end{equation}
+which jointly models representation learning and channel perturbations through semantic transmission.
+In the next section, we formalize this integrated perspective through a unified system model.
+\begin{table}[h]
+\centering
+\caption{List of Symbols}
+\label{tab:notation}
+\begin{tabular}{ll}
+\toprule
+Symbol & Description \\
+\midrule
+$X$ & Input data sample \\
+$Y$ & Target label \\
+$Z$ & Semantic representation generated at the client \\
+$\tilde{Z}$ & Received representation after channel transmission \\
+$f_c(\cdot)$ & Client-side neural network \\
+$f_s(\cdot)$ & Server-side neural network \\
+$\theta_c$ & Client-side model parameters \\
+$\theta_s$ & Server-side model parameters \\
+$K$ & Number of participating clients \\
+$\mathcal{D}_k$ & Local dataset of client $k$ \\
+$h$ & Wireless channel fading coefficient \\
+$n$ & Additive Gaussian channel noise \\
+$\epsilon$ & Channel-induced representation perturbation \\
+$C$ & Shannon channel capacity \\
+$C_s$ & Semantic capacity of the learning system \\
+$\pi_{\mathrm{ch}}$ & Channel-facing adaptation policy (compression, power, and control) \\
+$B$ & Channel bandwidth \\
+$\text{SNR}$ & Signal-to-noise ratio \\
+$I(\cdot;\cdot)$ & Mutual information between two variables \\
+$\ell(\cdot)$ & Training loss function \\
+$F$ & Semantic fidelity between transmitted and received representations \\
+$\eta$ & Learning rate \\
+\bottomrule
+\end{tabular}
+\end{table}
+\section{System Model}
+This section presents the system architecture and mathematical formulation of the proposed semantic channel learning (SCL) framework. We first describe the split federated learning architecture and the representation transmission process. We then introduce the wireless channel model and formalize the interaction between semantic representations and channel dynamics.
+\subsection{Split federated learning architecture}
+Consider a distributed learning system consisting of $K$ client devices connected to a central server through wireless communication links. Each client $k \in \{1,\dots,K\}$ possesses a local dataset
+\begin{equation}
+\mathcal{D}_k = \{(x_i,y_i)\}_{i=1}^{n_k}
+\end{equation}
+where $x_i$ denotes the input sample and $y_i$ denotes the corresponding label.
+Let the global neural network model be represented as
+\begin{equation}
+f_{\theta}(x) = f_s(f_c(x))
+\end{equation}
+This decomposition clarifies the split-execution pathway: clients construct semantic features, and the server completes task inference.
+where
+\begin{itemize}
+\item $f_c(\cdot)$ represents the client-side subnetwork
+\item $f_s(\cdot)$ represents the server-side subnetwork
+\item $\theta = (\theta_c,\theta_s)$ denotes model parameters client and server
+\end{itemize}
+In Split federated learning (SFL), each client computes the forward propagation through the client-side model\cite{thapa2022splitfedfederatedlearningmeets,vepakomma2018splitlearninghealthdistributed}
+\begin{equation}
+z_k = f_c(x;\theta_c)
+\end{equation}
+where $z_k$ represents the intermediate feature representation (smashed data) transmitted to the server\cite{vepakomma2018splitlearninghealthdistributed}.
+The server receives the representations from multiple clients and completes the forward pass
+\begin{equation}
+\hat{y}_k = f_s(z_k;\theta_s)
+\end{equation}
+The global learning objective is defined as
+\begin{equation}
+\min_{\theta_c,\theta_s} \sum_{k=1}^{K} \mathbb{E}_{(x,y)\sim \mathcal{D}_k}\left[\ell(f_s(f_c(x)),y)\right]
+\end{equation}
+where $\ell(\cdot)$ denotes the loss function.
+After computing the loss at the server, gradients are propagated back through the network. The server computes
+\begin{equation}
+g_s = \nabla_{\theta_s}\ell
+\end{equation}
+and transmits the corresponding gradients of the representation
+\begin{equation}
+g_z = \frac{\partial \ell}{\partial z_k}
+\end{equation}
+to the client, which then performs the backward pass
+\begin{equation}
+g_c = \nabla_{\theta_c}\ell.
+\end{equation}
+This process enables collaborative training while limiting the computational burden on edge devices.
+\subsection{Semantic representation transmission}
+In the proposed SCL framework, the intermediate representation $z_k$ (defined in Section III-A) is interpreted as a semantic embedding of the input that preserves task-relevant information while discarding redundancy. This compact latent-space transmission is the core reason SFL can reduce communication load relative to full-model exchange.
+The representation dimension is typically significantly smaller than the original input space,
+\begin{equation}
+\dim(z) \ll \dim(x),
+\end{equation}
+which yields communication compression before transmission.
+The representation $z$ is then transmitted through a wireless channel to the server. Unlike traditional distributed learning systems that assume error-free communication, the proposed framework explicitly models channel-induced perturbations affecting the semantic representation\cite{10741277,11134601}. To make this operational, Algorithm~\ref{alg:saset} introduces an SNR-adaptive semantic transmission routine.
+\begin{algorithm}[htbp]
+\caption{Proposed SNR-Adaptive Semantic Encoding and Transmission (SASET)}
+\label{alg:saset}
+\begin{algorithmic}[1]
+\REQUIRE Input sample $x_k$, client encoder $\theta_c$, channel estimate $(\hat{h}_k,\widehat{\mathrm{SNR}}_k)$, distortion budget $\delta$, power budget $P_k^{\max}$
+\ENSURE Received semantic representation $\tilde{z}_k$, compression ratio $\rho_k$, transmit power $p_k$
+\STATE Compute semantic feature $z_k \leftarrow f_c(x_k;\theta_c)$
+\STATE Estimate perturbation variance $\hat{\sigma}_{\epsilon,k}^2 \leftarrow \frac{\alpha}{1+\widehat{\mathrm{SNR}}_k}$
+\STATE Set adaptive compression ratio\[\rho_k \leftarrow \operatorname{clip}\left(1-\frac{\delta}{d_z\hat{\sigma}_{\epsilon,k}^2},\rho_{\min},\rho_{\max}\right)\]
+\STATE Compress representation $z_k^{(\rho)} \leftarrow \mathcal{Q}_{\rho_k}(z_k)$
+\STATE Set transmit power\[p_k \leftarrow \min\left(P_k^{\max},\frac{\gamma\sigma_n^2}{|\hat{h}_k|^2+\varepsilon_h}\right)\]
+\STATE Form transmit signal $s_k \leftarrow \sqrt{p_k}\,\mathcal{M}_k(z_k^{(\rho)})$
+\STATE Send through channel $r_k \leftarrow h_k s_k + n_k$
+\STATE Decode received representation $\tilde{z}_k \leftarrow \mathcal{D}_k(r_k)$
+\RETURN $(\tilde{z}_k,\rho_k,p_k)$
+\end{algorithmic}
+\end{algorithm}
+This operationalizes this idea by adapting compression and transmit power to instantaneous channel quality while respecting distortion and power constraints.
+\subsection{Wireless channel model}
+For client $k$, let the semantic representation produced by the client encoder be
+\begin{equation}
+z_k = f_c(x_k;\theta_c) \in \mathbb{R}^{d_z},\qquad
+s_k = \mathcal{M}_k(z_k) \in \mathbb{C}^{n},
+\end{equation}
+where $\mathcal{M}_k(\cdot)$ denotes modulation/channel encoding. We impose the average transmit-power constraint
+\begin{equation}
+\frac{1}{n}\mathbb{E}\|s_k\|^2 \le P_k.
+\end{equation}
+Over a block-flat fading link, the received signal is
+\begin{equation}
+r_k = h_k s_k + n_k,
+\qquad
+n_k \sim \mathcal{CN}(0,\sigma^2 I_n),
+\end{equation}
+and the server-side recovered representation is
+\begin{equation}
+\tilde{z}_k = \mathcal{D}_k(r_k),
+\end{equation}
+with $\mathcal{D}_k(\cdot)$ denoting channel decoding/demodulation\cite{Goldsmith_2005,Tse_Viswanath_2005}. Here $h_k$ is the wireless channel coefficient.
+We assume a Rayleigh fading channel, where the channel gain follows
+\begin{equation}
+h_k \sim \mathcal{CN}(0,1)
+\end{equation}
+The signal-to-noise ratio (SNR) is defined as
+\begin{equation}
+\text{SNR} = \frac{P}{\sigma^2}
+\end{equation}
+where $P$ denotes the transmit power.
+After channel transmission, the received representation at the server can be expressed as
+\begin{equation}
+\tilde{z}_k = z_k + \epsilon_k
+\end{equation}
+where $\epsilon_k$ represents channel-induced distortion.
+To connect channel quality with representation quality, we use the equivalent additive semantic-noise model
+\begin{equation}
+\epsilon_k \mid h_k \sim \mathcal{CN}(0,\sigma_{\epsilon,k}^2 I_{d_z}),
+\qquad
+\sigma_{\epsilon,k}^2 = \frac{\alpha}{1+\mathrm{SNR}_k}
+\end{equation}
+where $d_z$ is representation dimension and $\alpha>0$ captures modulation, quantization, and equalization mismatch. This yields the analytical distortion model
+\begin{equation}
+D_k \triangleq \mathbb{E}\|\tilde{z}_k-z_k\|^2=\mathbb{E}\|\epsilon_k\|^2=\frac{d_z\alpha}{1+\mathrm{SNR}_k}.
+\end{equation}
+The server therefore performs inference using perturbed semantic representations
+\begin{equation}
+\hat{y}_k = f_s(\tilde{z}_k).
+\end{equation}
+\subsection{Learning under channel perturbations}
+The presence of channel noise introduces stochastic perturbations to the transmitted representations. Consequently, the effective training objective becomes
+\begin{equation}
+\min_{\theta_c,\theta_s}\sum_{k=1}^{K}\mathbb{E}_{(x,y)\sim \mathcal{D}_k}\mathbb{E}_{\epsilon}\left[\ell(f_s(f_c(x)+\epsilon),y)\right].
+\end{equation}
+Using the distortion model above, the same objective can be written in channel-aware form as
+\begin{equation}
+\min_{\theta_c,\theta_s}\sum_{k=1}^{K}\mathbb{E}_{(x,y)\sim \mathcal{D}_k}\mathbb{E}_{\epsilon\sim\mathcal{CN}(0,\frac{\alpha}{1+\mathrm{SNR}_k}I)}\left[\ell(f_s(f_c(x)+\epsilon),y)\right],
+\end{equation}
+which explicitly shows that lower SNR induces larger perturbation variance in semantic representations. The resulting excess risk per client can be written as
+\begin{equation}
+\Delta\mathcal{L}_k
+\triangleq
+\mathbb{E}\left[\ell\big(f_s(z_k+\epsilon_k),y_k\big)-\ell\big(f_s(z_k),y_k\big)\right].
+\end{equation}
+Hence SCL can be interpreted as minimizing nominal learning loss while controlling $\Delta\mathcal{L}_k$, yielding improved robustness and stability over fading wireless channels.
+% ---------------------------------------------------------
+\section{Semantic Channel Learning Framework}
+In this section we introduce the proposed semantic channel learning (SCL) framework for wireless split federated learning. Instead of treating communication as an external transport layer, SCL optimizes the channel-aware learning objective
+\begin{equation}
+\min_{\theta_c,\theta_s}\mathbb{E}\left[\ell\big(f_s(f_c(X;\theta_c)+\epsilon;\theta_s),Y\big)\right],
+\end{equation}
+which directly couples wireless perturbations and task loss.
+\subsection{Motivation}
+Building on the channel model developed in Section III, we now shift from physical-layer equations to the optimization perspective of SCL. Specifically, SCL treats the received representation $\tilde{z}=z+\epsilon$ as the object of learning and optimizes expected task loss under SNR-dependent perturbation.
+Traditional communication systems target $\epsilon\to0$ at bit level. In contrast, SCL minimizes semantic sensitivity
+\begin{equation}
+\Delta_{\mathrm{sem}}
+\triangleq
+\mathbb{E}\left[\ell\big(f_s(\tilde{z}),y\big)-\ell\big(f_s(z),y\big)\right],
+\end{equation}
+so the representation itself becomes robust to channel perturbations during training.
+\subsection{Semantic channel learning architecture}
+The proposed SCL framework integrates wireless channel effects directly into the distributed learning pipeline. The overall process consists of the following stages:
+\begin{enumerate}
+\item Semantic encoding:
+Each client extracts task-relevant semantic representations from input data using the client encoder described in Section III-A.
+\item Channel transmission:
+The semantic representation is transmitted over the Rayleigh/AWGN channel defined in Section III-C.
+\item Semantic decoding and learning:
+The server performs inference using the received representation
+\begin{equation}
+\hat{y} = f_s(\tilde{z};\theta_s).
+\end{equation}
+\end{enumerate}
+By incorporating channel perturbations during training, the model solves
+\begin{equation}
+(\theta_c^*,\theta_s^*)=\arg\min_{\theta_c,\theta_s}\mathbb{E}\left[\ell\big(f_s(h\,\phi(X;\theta_c)+n;\theta_s),Y\big)\right],
+\end{equation}
+which adapts the representation space to channel impairments.
+The next subsection interprets this operational objective through an information-bottleneck lens.
+\subsection{Information bottleneck formulation}
+We cast SCL as a receiver-aware information bottleneck (IB) problem\cite{tishby2000informationbottleneckmethod,9082644}. Classical IB optimizes
+\begin{equation}
+\mathcal{L}_{\mathrm{IB}}=I(X;Z)-\beta I(Z;Y),\quad \beta>0,
+\end{equation}
+where $I(X;Z)$ is compression cost and $I(Z;Y)$ is task relevance.
+In wireless SFL, the server operates on $\tilde{Z}$, not on $Z$, due to channel mapping $p(\tilde{z}\mid z,h)$ under fading/noise\cite{9014530,9042352}. The operational objective is therefore
+\begin{equation}
+\mathcal{L}_{\mathrm{SCL\mbox{-}IB}}=I(X;Z)-\beta I(\tilde{Z};Y).
+\end{equation}
+Under the Markov chain $X\rightarrow Z\rightarrow \tilde{Z}\rightarrow Y$, data processing gives
+\begin{equation}
+I(\tilde{Z};Y) \le I(Z;Y) \le I(X;Y),
+\end{equation}
+and the channel-induced semantic loss is
+\begin{equation}
+\Delta_{\mathrm{ch}}
+\triangleq
+I(Z;Y)-I(\tilde{Z};Y)
+\ge 0.
+\end{equation}
+\textbf{Intuition:} IB optimizes what semantics are encoded; the channel determines what semantics survive at the receiver.
+\textbf{Implication:} maximizing $I(Z;Y)$ alone is insufficient in wireless SFL; one must directly optimize receiver-side relevance $I(\tilde{Z};Y)$. Algorithm~\ref{alg:sc2sfl} implements this principle.
+\begin{algorithm}[t]
+\caption{Proposed Semantic-Capacity-Constrained Split Federated Learning (SC$^2$-SFL)}
+\label{alg:sc2sfl}
+\begin{algorithmic}[1]
+\REQUIRE Initial parameters $(\theta_c^0,\theta_s^0)$, rounds $T$, clients $K$, coefficients $(\lambda,\beta,\mu)$, Byzantine bound $f_{\max}$
+\ENSURE Trained parameters $(\theta_c^T,\theta_s^T)$
+\FOR{$t=1,2,\ldots,T$}
+\STATE Server broadcasts $\theta_s^{t-1}$ to participating clients
+\FOR{each client $k \in \{1,\ldots,K\}$}
+\STATE Sample mini-batch $(x_k,y_k)\sim\mathcal{D}_k$
+\STATE $(\tilde{z}_k,\rho_k,p_k) \leftarrow \text{Algorithm~\ref{alg:saset}}(x_k,\theta_c^{t-1},\widehat{\mathrm{SNR}}_k)$
+\STATE Compute clean feature $z_k \leftarrow f_c(x_k;\theta_c^{t-1})$
+\STATE Compute channel-aware objective
+\[
+\begin{aligned}
+J_k \leftarrow {}& \ell\big(f_s(\tilde{z}_k;\theta_s^{t-1}),y_k\big)
++\lambda\widehat{I}(X_k;Z_k) \\
+&-\beta\widehat{I}(\tilde{Z}_k;Y_k)
++\mu\|\tilde{z}_k-z_k\|^2
+\end{aligned}
+\]
+\STATE Server computes $g_{s,k}\leftarrow\nabla_{\theta_s}J_k$ and $g_{\tilde{z},k}\leftarrow\frac{\partial J_k}{\partial \tilde{z}_k}$
+\STATE Client backpropagates $g_{\tilde{z},k}$ and obtains local gradient $g_{c,k}$
+\STATE Compensate channel-induced bias\[\bar{g}_{c,k} \leftarrow g_{c,k}-\frac{1}{2}\,\widehat{\mathcal{T}}_{\theta,zz,k}:\widehat{\Sigma}_{\epsilon,k}\]
+\STATE Upload $(\bar{g}_{c,k},g_{s,k},F_k,D_k)$ to server
+\ENDFOR
+\STATE Aggregate client and server gradients with Algorithm~\ref{alg:bcbsa}\[\hat{g}_c^t \leftarrow \text{Algorithm~\ref{alg:bcbsa}}\big(\{\bar{g}_{c,k},F_k,D_k\}_{k=1}^K,f_{\max}\big)\]\[\hat{g}_s^t \leftarrow \text{Algorithm~\ref{alg:bcbsa}}\big(\{g_{s,k},F_k,D_k\}_{k=1}^K,f_{\max}\big)\]
+\STATE Update parameters\[\theta_c^t \leftarrow \theta_c^{t-1}-\eta_t\hat{g}_c^t,\qquad\theta_s^t \leftarrow \theta_s^{t-1}-\eta_t\hat{g}_s^t\]
+\ENDFOR
+\RETURN $(\theta_c^T,\theta_s^T)$
+\end{algorithmic}
+\end{algorithm}
+For reproducibility, the mutual-information surrogates in Algorithm~\ref{alg:sc2sfl} are implemented as a variational IB proxy\cite{alemi2017vib} (with MINE-style alternatives possible\cite{belghazi2018mine}). For a mini-batch of size $B$, we use
+\begin{equation}
+\widehat{I}(X;Z)
+\triangleq
+\frac{1}{B}\sum_{b=1}^{B}
+D_{\mathrm{KL}}\!\left(q_\phi(z\mid x_b)\,\|\,r(z)\right),
+\end{equation}
+with prior $r(z)=\mathcal{N}(0,I)$, and
+\begin{equation}
+\widehat{I}(\tilde{Z};Y)
+\triangleq
+H(Y)-\widehat{H}(Y\mid\tilde{Z})
+\approx
+\log |\mathcal{Y}|-\frac{1}{B}\sum_{b=1}^{B}\mathrm{CE}\big(y_b,\hat{y}_b(\tilde{z}_b)\big),
+\end{equation}
+where $\mathrm{CE}(\cdot)$ is cross-entropy. Since $H(Y)$ is constant for a fixed dataset, maximizing $\widehat{I}(\tilde{Z};Y)$ is equivalent to minimizing conditional prediction uncertainty. This resolves the implementation ambiguity of the IB terms.
+\subsection{Semantic capacity of learning systems}
+Definition 1 (Semantic capacity): The semantic capacity of SCL is the largest receiver-side task information achievable under a channel-constrained representation budget:
+\begin{equation}
+C_s=\sup_{I(X;Z)\le C} I(\tilde{Z};Y),
+\end{equation}
+where $C$ is Shannon capacity.
+To separate representation and channel effects, define the IB relevance frontier
+\begin{equation}
+\mathcal{F}_{\mathrm{IB}}(C)
+\triangleq
+\sup_{I(X;Z)\le C} I(Z;Y),
+\end{equation}
+and the receiver-side retention factor
+\begin{equation}
+\rho_s
+\triangleq
+\frac{I(\tilde{Z};Y)}{I(Z;Y)}
+\in[0,1].
+\end{equation}
+Then
+\begin{equation}
+C_s=\sup_{I(X;Z)\le C} \rho_s I(Z;Y)\le\min\{C,\mathcal{F}_{\mathrm{IB}}(C)\}.
+\end{equation}
+\textbf{Intuition:} $\mathcal{F}_{\mathrm{IB}}(C)$ measures the best relevance the encoder could generate without channel loss; $\rho_s$ measures how much of that relevance is preserved after transmission.
+\textbf{Implication:} semantic reliability is jointly limited by representation design and channel quality. SCL must raise both the encoder frontier ($\mathcal{F}_{\mathrm{IB}}$) and retention ($\rho_s$), rather than optimizing either in isolation.
+A useful normalized semantic-efficiency metric is
+\begin{equation}
+\eta_s \triangleq \frac{C_s}{C} \in [0,1],
+\end{equation}
+with larger $\eta_s$ indicating better semantic use of available channel resources.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% formulation of shannon capacity
+
+\subsection{Learning channel interaction}
+
+The SCL design variable is not only the encoder $\theta_c$ but also the channel-facing policy (compression/power/adaptation), denoted by $\pi_{\mathrm{ch}}$. The operational objective is
+\begin{equation}
+\max_{\theta_c,\theta_s,\pi_{\mathrm{ch}}}
+I(\tilde{Z};Y)
+\quad
+\text{s.t.}
+\quad
+I(X;Z)\le C.
+\end{equation}
+Using the decomposition from the previous subsection,
+\begin{equation}
+I(\tilde{Z};Y)=\rho_s\,I(Z;Y),\qquad\rho_s\in[0,1],
+\end{equation}
+the coupling becomes explicit: encoder design controls the relevance term $I(Z;Y)$, while channel adaptation controls retention $\rho_s$.
+A Lagrangian form used in training is
+\begin{equation}
+\max_{\theta_c,\theta_s,\pi_{\mathrm{ch}}}I(\tilde{Z};Y)-\lambda I(X;Z)-\mu\,\mathbb{E}\|\tilde{Z}-Z\|^2,\quad \lambda,\mu\ge0,
+\end{equation}
+which jointly penalizes over-complex representations and channel fragility while maximizing receiver-side task information.
+% ---------------------------------------------------------
+\section{Theoretical Analysis}
+This section develops channel-learning theory for SCL and introduces an analytical model that directly links wireless SNR, semantic representation distortion, and optimization stability. We proceed in three stages: channel-to-distortion coupling, semantic-capacity/robustness bounds, and convergence behavior under channel-induced gradient noise.
+\subsection{Analytical channel-learning coupling model}
+We now derive an explicit channel-to-optimization coupling model used in the sequel.
+For one training sample $(x_t,y_t)$ at iteration $t$, the client produces the semantic representation
+\begin{equation}
+z_t = f_c(x_t;\theta_t^c) \in \mathbb{C}^{d_z}.
+\end{equation}
+Assume flat fading at this iteration. The received vector before equalization is
+\begin{equation}
+r_t = h_t z_t + n_t,\qquad
+n_t\sim\mathcal{CN}(0,\sigma_n^2 I_{d_z}).
+\end{equation}
+Let a linear equalizer with gain $w_t$ produce
+\begin{equation}
+\tilde{z}_t = w_t r_t=z_t + \epsilon_t,
+\qquad
+\epsilon_t=(w_t h_t-1)z_t+w_t n_t.
+\end{equation}
+Define the instantaneous signal-to-noise ratio as
+\begin{equation}
+\mathrm{SNR}_t = \frac{P_t|h_t|^2}{\sigma_n^2},
+\end{equation}
+and model the effective post-equalization perturbation as conditionally isotropic Gaussian
+\begin{equation}
+\epsilon_t\mid\mathcal{F}_t \sim \mathcal{CN}(0,\sigma_{\epsilon,t}^2 I_{d_z}),
+\qquad
+\sigma_{\epsilon,t}^2 = \frac{\alpha}{1+\mathrm{SNR}_t},
+\end{equation}
+where $\mathcal{F}_t$ is the history up to iteration $t$ and $\alpha>0$ absorbs non-ideal implementation effects (imperfect CSI/equalization, finite quantization, synchronization residuals).
+The induced semantic distortion is
+\begin{equation}
+\mathcal{D}_t
+\triangleq
+\mathbb{E}_t\|\tilde{z}_t-z_t\|^2=
+\mathbb{E}_t\|\epsilon_t\|^2,
+\end{equation}
+with the step-by-step evaluation
+\begin{equation}
+\begin{aligned}
+\mathcal{D}_t
+&=
+\mathbb{E}_t\left[\operatorname{tr}(\epsilon_t\epsilon_t^{\mathrm{H}})\right] \\
+&=
+\operatorname{tr}\!\left(\mathbb{E}_t[\epsilon_t\epsilon_t^{\mathrm{H}}]\right) \\
+&=
+\operatorname{tr}(\sigma_{\epsilon,t}^2 I_{d_z}) \\
+&=
+d_z\sigma_{\epsilon,t}^2 \\
+&=
+\frac{d_z\alpha}{1+\mathrm{SNR}_t}.
+\end{aligned}
+\end{equation}
+To link this to optimization, define the per-sample loss
+\begin{equation}
+\mathcal{L}_t(\theta,z) \triangleq \ell(f_s(z;\theta^s),y_t),
+\qquad
+g_t(z) \triangleq \nabla_{\theta}\mathcal{L}_t(\theta_t,z).
+\end{equation}
+The clean and perturbed sample gradients are
+\begin{equation}
+g_t \triangleq g_t(z_t),
+\qquad
+\hat{g}_t \triangleq g_t(z_t+\epsilon_t).
+\end{equation}
+Using first-order expansion of $g_t(z)$ around $z_t$,
+\begin{equation}
+\hat{g}_t
+=
+g_t
++
+J_t\epsilon_t
++
+\rho_t,
+\qquad
+J_t \triangleq \left.\frac{\partial g_t(z)}{\partial z}\right|_{z=z_t},
+\end{equation}
+where $\rho_t$ is the remainder. If the gradient Jacobian is locally $L_J$-Lipschitz in $z$, then
+\begin{equation}
+\|\rho_t\|
+\le
+\frac{L_J}{2}\|\epsilon_t\|^2.
+\end{equation}
+Hence, in the small-perturbation regime (or by absorbing $\rho_t$ into higher-order noise), we use
+\begin{equation}
+\hat{g}_t \approx g_t + J_t\epsilon_t.
+\end{equation}
+Now decompose sample stochasticity as
+\begin{equation}
+g_t = \nabla F(\theta_t)+\xi_t^{\mathrm{data}},
+\qquad
+\mathbb{E}_t[\xi_t^{\mathrm{data}}]=0,
+\end{equation}
+which yields the working gradient model
+\begin{equation}
+\tilde{g}_t
+=
+\nabla F(\theta_t)
++
+\xi_t^{\mathrm{data}}
++
+J_t\epsilon_t.
+\end{equation}
+The channel-induced gradient perturbation admits the exact second-moment identity
+\begin{equation}
+\begin{aligned}
+\mathbb{E}_t\|J_t\epsilon_t\|^2
+&=
+\mathbb{E}_t\!\left[\epsilon_t^{\mathrm{H}}J_t^{\mathrm{H}}J_t\epsilon_t\right] \\
+&=
+\sigma_{\epsilon,t}^2\operatorname{tr}(J_t^{\mathrm{H}}J_t) \\
+&=
+\sigma_{\epsilon,t}^2\|J_t\|_F^2 \\
+&\le
+\sigma_{\epsilon,t}^2 d_z\|J_t\|_2^2 \\
+&=
+\frac{\alpha d_z}{1+\mathrm{SNR}_t}\|J_t\|_2^2.
+\end{aligned}
+\end{equation}
+Therefore, lower SNR increases both semantic distortion and gradient-noise power in a quantitatively coupled manner through the same factor $(1+\mathrm{SNR}_t)^{-1}$.
+\subsection{Representation robustness under channel perturbations}
+Theorem 1: SNR-dependent robustness bound.
+Assume the server model $f_s$ is $L_s$-Lipschitz and the loss $\ell(\cdot,y)$ is $L_\ell$-Lipschitz in its first argument. Then
+\begin{equation}
+\mathbb{E}\|f_s(\tilde{z}_t)-f_s(z_t)\|
+\le
+L_s\sqrt{\frac{d_z\alpha}{1+\mathrm{SNR}_t}},
+\end{equation}
+and the expected excess loss satisfies
+\begin{equation}
+\mathbb{E}\left[\ell(f_s(\tilde{z}_t),y_t)-\ell(f_s(z_t),y_t)\right]
+\le
+L_\ell L_s\sqrt{\frac{d_z\alpha}{1+\mathrm{SNR}_t}}.
+\end{equation}
+\begin{equation}
+\begin{aligned}
+\mathbb{E}\|f_s(\tilde{z}_t)-f_s(z_t)\|
+&\le \mathbb{E}\left[L_s\|\tilde{z}_t-z_t\|\right] \\
+&= L_s\mathbb{E}\|\epsilon_t\| \\
+&\le L_s\sqrt{\mathbb{E}\|\epsilon_t\|^2} \\
+&= L_s\sqrt{\frac{d_z\alpha}{1+\mathrm{SNR}_t}}.
+\end{aligned}
+\end{equation}
+\begin{equation}
+\begin{aligned}
+\mathbb{E}\left[\ell(f_s(\tilde{z}_t),y_t)-\ell(f_s(z_t),y_t)\right]
+&\le
+\mathbb{E}\left|\ell(f_s(\tilde{z}_t),y_t)-\ell(f_s(z_t),y_t)\right| \\
+&\le
+L_\ell\mathbb{E}\|f_s(\tilde{z}_t)-f_s(z_t)\| \\
+&\le
+L_\ell L_s\sqrt{\frac{d_z\alpha}{1+\mathrm{SNR}_t}}.
+\end{aligned}
+\end{equation}
+\hfill $\square$
+Theorem~1 therefore provides a direct SNR-to-loss bound that we later test against the measured accuracy response across channel conditions.
+\subsection{Semantic capacity of learning systems}
+We next derive an analytical semantic-capacity characterization.
+Theorem 2: Semantic capacity bound with representation geometry.
+Let
+\begin{equation}
+C = B\log_2(1+\mathrm{SNR})
+\end{equation}
+be the Shannon capacity. Defining semantic capacity as
+\begin{equation}
+C_s = \max I(\tilde{Z};Y)
+\quad
+\text{s.t.}
+\quad
+I(X;Z)\le C,
+\end{equation}
+we have
+\begin{equation}
+C_s \le C.
+\end{equation}
+Under a Gaussian representation surrogate $Z\sim\mathcal{N}(0,\Sigma_z)$ and additive channel distortion $\epsilon\sim\mathcal{N}(0,\sigma_\epsilon^2 I)$ with $\sigma_\epsilon^2=\alpha/(1+\mathrm{SNR})$, we further obtain
+\begin{equation}
+C_s
+\le
+\min\left\{
+\begin{array}{l}
+B\log_2(1+\mathrm{SNR}), \\
+\frac{1}{2}\log_2\det\left(I + \frac{1+\mathrm{SNR}}{\alpha}\Sigma_z\right)
+\end{array}
+\right\}.
+\end{equation}
+\begin{equation}
+\begin{aligned}
+C_s
+&=
+\max_{I(X;Z)\le C} I(\tilde{Z};Y) \\
+&\le
+\max_{I(X;Z)\le C} I(\tilde{Z};Z) \\
+&=
+\max_{I(X;Z)\le C} I(Z;\tilde{Z}) \\
+&\le
+\max_{p(z)} I(Z;\tilde{Z}) \\
+&=
+C.
+\end{aligned}
+\end{equation}
+\begin{equation}
+\begin{aligned}
+I(Z;\tilde{Z})
+&= h(\tilde{Z}) - h(\tilde{Z}\mid Z) \\
+&= h(Z+\epsilon)-h(\epsilon) \\
+&\le
+\frac{1}{2}\log_2\det\left(2\pi e(\Sigma_z+\sigma_\epsilon^2 I)\right)
+-
+\frac{1}{2}\log_2\det\left(2\pi e\sigma_\epsilon^2 I\right) \\
+&=
+\frac{1}{2}\log_2\det\left(I+\frac{1}{\sigma_\epsilon^2}\Sigma_z\right) \\
+&=
+\frac{1}{2}\log_2\det\left(I+\frac{1+\mathrm{SNR}}{\alpha}\Sigma_z\right).
+\end{aligned}
+\end{equation}
+\begin{equation}
+\begin{aligned}
+C_s
+&\le \min\left\{C,\;\max I(Z;\tilde{Z})\right\} \\
+&\le
+\min\left\{
+B\log_2(1+\mathrm{SNR}),
+\frac{1}{2}\log_2\det\left(I+\frac{1+\mathrm{SNR}}{\alpha}\Sigma_z\right)
+\right\}.
+\end{aligned}
+\end{equation}
+\hfill $\square$
+This result shows that semantic utility is jointly limited by physical channel capacity and latent-representation geometry.
+Remark 1 (IB relevance frontier versus semantic capacity): Let
+\begin{equation}
+\mathcal{F}_{\mathrm{IB}}(C)
+\triangleq
+\sup_{I(X;Z)\le C} I(Z;Y).
+\end{equation}
+Then Theorem~2 implies
+\begin{equation}
+C_s
+\le
+\min\left\{C,\,\mathcal{F}_{\mathrm{IB}}(C)\right\}.
+\end{equation}
+Therefore, an IB-optimal encoder alone does not guarantee maximal receiver-side relevance: channel geometry and SNR determine what fraction of the IB relevance frontier remains usable for downstream learning.
+\subsection{Learning stability under channel noise}
+We now quantify the optimization impact of channel noise.
+Theorem 3: Convergence with SNR-dependent gradient variance.
+Assume $F(\theta)$ is $L$-smooth, $\mathbb{E}[\xi_t^{\mathrm{data}}]=0$, $\mathbb{E}\|\xi_t^{\mathrm{data}}\|^2\le\sigma_d^2$, and $\|J_t\|_2\le L_g$. For the update
+\begin{equation}
+\theta_{t+1} = \theta_t - \eta\tilde{g}_t,
+\end{equation}
+the average stationarity bound is
+\begin{equation}
+\frac{1}{T}\sum_{t=1}^{T}\mathbb{E}\|\nabla F(\theta_t)\|^2
+\le
+\frac{2(F(\theta_0)-F^*)}{\eta T}
++
+\eta L\left(
+\sigma_d^2
++
+L_g^2d_z\alpha\,\Gamma_T
+\right),
+\end{equation}
+where
+\begin{equation}
+\Gamma_T \triangleq \frac{1}{T}\sum_{t=1}^{T}\frac{1}{1+\mathrm{SNR}_t}.
+\end{equation}
+\begin{equation}
+\begin{aligned}
+F(\theta_{t+1})
+&\le
+F(\theta_t)
++
+\left\langle \nabla F(\theta_t),\theta_{t+1}-\theta_t\right\rangle
++
+\frac{L}{2}\|\theta_{t+1}-\theta_t\|^2 \\
+&=
+F(\theta_t)
+-
+\eta\left\langle \nabla F(\theta_t),\tilde{g}_t\right\rangle
++
+\frac{L\eta^2}{2}\|\tilde{g}_t\|^2.
+\end{aligned}
+\end{equation}
+\begin{equation}
+\begin{aligned}
+\tilde{g}_t
+&=
+\nabla F(\theta_t)+e_t,
+\qquad
+e_t = \xi_t^{\mathrm{data}} + J_t\epsilon_t, \\
+\mathbb{E}_t[e_t]
+&=
+0,
+\qquad
+\mathbb{E}_t\|e_t\|^2
+=
+\mathbb{E}_t\|\xi_t^{\mathrm{data}}+J_t\epsilon_t\|^2 \\
+&=
+\mathbb{E}_t\|\xi_t^{\mathrm{data}}\|^2
++
+\mathbb{E}_t\|J_t\epsilon_t\|^2 \\
+&\le
+\sigma_d^2
++
+\|J_t\|_2^2\mathbb{E}_t\|\epsilon_t\|^2 \\
+&\le
+\sigma_d^2
++
+\frac{L_g^2 d_z\alpha}{1+\mathrm{SNR}_t}
+\triangleq
+\sigma_t^2.
+\end{aligned}
+\end{equation}
+\begin{equation}
+\begin{aligned}
+\mathbb{E}_t\left[F(\theta_{t+1})\right]
+&\le
+F(\theta_t)
+-
+\eta\|\nabla F(\theta_t)\|^2
++
+\frac{L\eta^2}{2}\mathbb{E}_t\|\nabla F(\theta_t)+e_t\|^2 \\
+&=
+F(\theta_t)
+-
+\eta\|\nabla F(\theta_t)\|^2
++
+\frac{L\eta^2}{2}
+\left(\|\nabla F(\theta_t)\|^2+\mathbb{E}_t\|e_t\|^2\right) \\
+&=
+F(\theta_t)
+-
+\eta\left(1-\frac{L\eta}{2}\right)\|\nabla F(\theta_t)\|^2
++
+\frac{L\eta^2}{2}\sigma_t^2 \\
+&\le
+F(\theta_t)
+-
+\frac{\eta}{2}\|\nabla F(\theta_t)\|^2
++
+\frac{L\eta^2}{2}\sigma_t^2,
+\quad \eta\le \frac{1}{L}.
+\end{aligned}
+\end{equation}
+\begin{equation}
+\begin{aligned}
+\frac{\eta}{2}\mathbb{E}\|\nabla F(\theta_t)\|^2
+&\le
+\mathbb{E}[F(\theta_t)]
+-
+\mathbb{E}[F(\theta_{t+1})]
++
+\frac{L\eta^2}{2}\mathbb{E}[\sigma_t^2].
+\end{aligned}
+\end{equation}
+\begin{equation}
+\begin{aligned}
+\frac{\eta}{2}\sum_{t=1}^{T}\mathbb{E}\|\nabla F(\theta_t)\|^2
+&\le
+F(\theta_0)-F^*
++
+\frac{L\eta^2}{2}\sum_{t=1}^{T}\mathbb{E}[\sigma_t^2] \\
+&\le
+F(\theta_0)-F^*
++
+\frac{L\eta^2T}{2}
+\left(\sigma_d^2+L_g^2d_z\alpha\Gamma_T\right).
+\end{aligned}
+\end{equation}
+\begin{equation}
+\frac{1}{T}\sum_{t=1}^{T}\mathbb{E}\|\nabla F(\theta_t)\|^2
+\le
+\frac{2(F(\theta_0)-F^*)}{\eta T}
++
+\eta L\left(\sigma_d^2+L_g^2d_z\alpha\Gamma_T\right).
+\end{equation}
+\hfill $\square$
+Hence, channel noise appears in optimization as a structured variance term rather than an unmodeled disturbance.
+Importantly, Theorems~1-3 are worst-case bounds. Their numerical tightness depends on unknown constants $(L_s,L_\ell,L_g)$ and on how much the channel term contributes relative to data stochasticity $\sigma_d^2$. Therefore, in Section~VII we use these bounds primarily for trend interpretation (monotonic dependence on $(1+\mathrm{SNR})^{-1}$), not as point-accurate predictors of accuracy gaps.
+For clarity, SNR values reported in dB are converted to a linear scale in theoretical terms. For example,
+\begin{equation}
+\Gamma(10\,\mathrm{dB})=\frac{1}{1+10}=0.0909,
+\qquad
+\Gamma(30\,\mathrm{dB})=\frac{1}{1+1000}\approx 0.001.
+\end{equation}
+If empirical accuracy changes remain small despite this variance gap, it indicates either a dominant data-noise term or conservative (loose) Lipschitz constants in the bound.
+\subsection{Bias-aware robustness under semantic perturbation}
+Theorem 4: Gradient distortion under channel perturbation.
+\begin{equation}
+\mathcal{L}(\theta)
+=
+\mathbb{E}_{(x,y)}\left[\ell\left(f_s(f_c(x;\theta)),y\right)\right],
+\end{equation}
+\begin{equation}
+\tilde{\mathcal{L}}(\theta)
+=
+\mathbb{E}_{(x,y),\epsilon}\left[\ell\left(f_s(f_c(x;\theta)+\epsilon),y\right)\right].
+\end{equation}
+\begin{equation}
+g(\theta,\epsilon)
+\triangleq
+\nabla_\theta \ell\left(f_s(f_c(x;\theta)+\epsilon),y\right).
+\end{equation}
+\begin{equation}
+\begin{aligned}
+g(\theta,\epsilon)
+&=
+g(\theta,0)
++
+J_{\theta,z}(\theta)\epsilon
++
+\frac{1}{2}\,\mathcal{T}_{\theta,zz}(\theta):\left(\epsilon\epsilon^\top\right)
++
+r_3(\epsilon).
+\end{aligned}
+\end{equation}
+
+\begin{equation}
+\begin{aligned}
+\mathbb{E}_{\epsilon}[g(\theta,\epsilon)]
+&=
+g(\theta,0)
++
+J_{\theta,z}(\theta)\mathbb{E}[\epsilon]
++
+\frac{1}{2}\,\mathcal{T}_{\theta,zz}(\theta):\Sigma_\epsilon
++
+\mathbb{E}[r_3(\epsilon)].
+\end{aligned}
+\end{equation}
+\begin{equation}
+\begin{aligned}
+\mathbb{E}[\nabla \tilde{\mathcal{L}}(\theta)]
+&=
+\nabla \mathcal{L}(\theta)
++
+\frac{1}{2}\,\mathbb{E}_{(x,y)}\left[\mathcal{T}_{\theta,zz}(\theta)\right]:\Sigma_\epsilon
++
+\mathbb{E}_{(x,y),\epsilon}[r_3(\epsilon)].
+\end{aligned}
+\end{equation}
+\begin{equation}
+\mathbb{E}[\epsilon]=0,
+\quad
+\Sigma_\epsilon\neq 0,
+\quad
+\mathbb{E}_{(x,y)}\left[\mathcal{T}_{\theta,zz}(\theta)\right]\neq 0
+\;
+\Longrightarrow
+\;
+\mathbb{E}[\nabla \tilde{\mathcal{L}}(\theta)] \neq \nabla \mathcal{L}(\theta).
+\end{equation}
+\hfill $\square$
+Thus, even zero-mean channel perturbations can induce non-zero gradient bias through second-order model geometry.
+Theorem 5: Counterexample to $f<\frac{N}{2}$ sufficiency under semantic compression bias.
+\begin{equation}
+\tilde{g}_i = Q(g_i),
+\qquad
+\tilde{g}_i = g + b,
+\quad i\in\mathcal{H},
+\quad |\mathcal{H}|=N-f,
+\quad b\neq 0,
+\end{equation}
+\begin{equation}
+m_j \in \mathbb{R}^d,
+\quad j\in\mathcal{B},
+\quad |\mathcal{B}|=f,
+\quad
+f<\frac{N}{2}.
+\end{equation}
+\begin{equation}
+\hat{g} = \operatorname{Median}\left(\{\tilde{g}_i\}_{i\in\mathcal{H}} \cup \{m_j\}_{j\in\mathcal{B}}\right).
+\end{equation}
+\begin{equation}
+N-f > \frac{N}{2}
+\Longrightarrow
+\hat{g}=g+b.
+\end{equation}
+\begin{equation}
+\|\hat{g}-g\|_2 = \|b\|_2 > 0.
+\end{equation}
+\begin{equation}
+f<\frac{N}{2}
+\;\nRightarrow\;
+\hat{g}=g.
+\end{equation}
+\begin{equation}
+f<\frac{N}{2}
+\;\nRightarrow\;
+\|\hat{g}-g\|_2 \le \varepsilon_0
+\quad
+\text{for any } \varepsilon_0 \text{ independent of compression bias}.
+\end{equation}
+\hfill $\square$
+The practical implication is that robustness guarantees must account for semantic compression bias, not only malicious-client fraction.
+\subsection{Communication learning interaction}
+The preceding results motivate a joint objective that explicitly balances utility, compression, and channel robustness:
+\begin{equation}
+\max_{\theta_c,\theta_s}
+I(\tilde{Z};Y)
+-
+\lambda I(X;Z)
+-
+\mu\,\mathbb{E}\left[\frac{d_z\alpha}{1+\mathrm{SNR}}\right],
+\end{equation}
+with Lagrange multipliers $\lambda,\mu\ge0$. This analytical formulation makes the channel-learning trade-off explicit and provides a principled basis for SCL design.
+The theoretical results above provide an analytical grounding for SCL through explicit SNR-to-distortion and distortion-to-convergence relationships; Section~VII then evaluates which predicted trends are empirically strong versus weak.
+\subsection{Complexity analysis of proposed algorithms}
+We analyze the complexity of the three proposed components: Algorithm~\ref{alg:saset}, Algorithm~\ref{alg:sc2sfl}, and Algorithm~\ref{alg:bcbsa}. Let $d_z$ denote semantic representation dimension, $d_\theta$ denote gradient dimension, $n$ denote channel-symbol dimension, $K$ denote active clients per round, and $I_{\mathrm{geo}}$ denote the number of geometric-median iterations.
+For SASET (Algorithm~\ref{alg:saset}), the per-client complexity is
+\begin{equation}
+T_{\mathrm{SASET}} = O\left(C_c^{\mathrm{fwd}} + d_z + n\right),
+\qquad
+M_{\mathrm{SASET}} = O(d_z+n),
+\end{equation}
+where $C_c^{\mathrm{fwd}}$ is the client forward-pass cost.
+For BCBSA (Algorithm~\ref{alg:bcbsa}), trust scoring and residual evaluation require $O(Kd_\theta)$, sorting requires $O(K\log K)$, and geometric-median refinement requires $O(I_{\mathrm{geo}}Kd_\theta)$. Thus,
+\begin{equation}
+T_{\mathrm{BCBSA}}
+=
+O\left(K\log K + I_{\mathrm{geo}}Kd_\theta\right).
+\end{equation}
+For SC$^2$-SFL (Algorithm~\ref{alg:sc2sfl}), each round includes client/server optimization and two robust aggregations. The round complexity is
+\begin{equation}
+\begin{aligned}
+T_{\mathrm{round}}
+&=
+O\left(K\left(C_c + C_s + d_z + n\right) + 2T_{\mathrm{BCBSA}}\right) \\
+&=
+O\left(K\left(C_c + C_s + d_z + n + I_{\mathrm{geo}}d_\theta\right) + K\log K\right),
+\end{aligned}
+\end{equation}
+where $C_c$ and $C_s$ denote per-client and server-side backpropagation costs. The per-round communication complexity is
+\begin{equation}
+B_{\mathrm{round}}
+=
+O\left(K(1-\bar{\rho})d_z + Kd_z\right),
+\end{equation}
+with $\bar{\rho}$ the average compression ratio. Hence, the proposed framework scales linearly in $K$ (up to a $K\log K$ robust-selection term), which is suitable for large wireless edge deployments.
+The above theory directly determines what is tested next. Theorem~1 predicts an SNR-to-distortion-to-loss relationship, so Section~VI measures accuracy, fidelity, and BER across SNR levels. Theorem~3 motivates convergence-profile analysis under channel noise, while Theorems~4 and~5 motivate attack-defense experiments that isolate gradient bias and robustness failure modes. Consequently, Section~VI uses a controlled matrix over SNR, attack type, and aggregation rule to provide one-to-one empirical checks of the theoretical claims.
+\subsection{System parameters}
+Table~\ref{tab:parameters} consolidates the variables used across the manuscript (system model, theory, algorithms, and experiments).
+\begin{table*}[htbp]
+\centering
+\caption{Comprehensive symbols and parameters used across the paper}
+\label{tab:parameters}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{p{0.24\textwidth}p{0.22\textwidth}p{0.50\textwidth}}
+\toprule
+\textbf{Symbol(s)} & \textbf{Value / Range} & \textbf{Meaning / Usage} \\
+\midrule
+$(X,Y)$ & Dataset-dependent & Input and target random variables. \\
+$(x_i,y_i),\;\mathcal{D}_k,\;n_k$ & Empirical local samples & Local data pair, local dataset of client $k$, and local sample count. \\
+$K$ & 50 (experiments) & Number of participating clients. \\
+$t,\;T$ & $t=1,\ldots,T$, $T=50$ rounds & Training iteration index and total rounds. \\
+$f,\;N,\;f_{\max}$ & Scenario-dependent & Byzantine client count, total clients, and robust-filter bound. \\
+$f_c(\cdot),\;f_s(\cdot)$ & ResNet-18 split & Client-side and server-side subnetworks. \\
+$\theta_c,\;\theta_s,\;\theta$ & Learned parameters & Client, server, and joint model parameters. \\
+$Z,\tilde{Z},\;z_k,\tilde{z}_k$ & Learned latent representations & Semantic representation before/after channel perturbation. \\
+$d_z,\;d_s$ & Model-dependent, $d_s=32768$ & Semantic latent dimension and smashed-feature size. \\
+$\mathcal{M}_k(\cdot),\;\mathcal{D}_k(\cdot)$ & Encoder/decoder mappings & Channel modulation and demodulation mappings. \\
+$s_k,\;r_k$ & Complex channel symbols & Transmitted and received channel vectors. \\
+$h_k,\;n_k,\;\epsilon_k$ & Rayleigh/AWGN model & Fading gain, additive channel noise, and semantic perturbation. \\
+$P_k,\;P,\;p_k$ & Budget-limited & Client power budget, nominal transmit power, adaptive transmit power. \\
+$\sigma^2,\;\sigma_n^2,\;\sigma_{\epsilon,k}^2$ & Noise-dependent & AWGN variance, channel-noise variance, effective semantic-noise variance. \\
+$\mathrm{SNR},\;\mathrm{SNR}_k,\;\widehat{\mathrm{SNR}}_k$ & Sweep over channel conditions & Global/client SNR and estimated SNR used by adaptive transmission. \\
+$\alpha$ & Positive constant & Distortion scaling factor in $\sigma_\epsilon^2=\alpha/(1+\mathrm{SNR})$. \\
+$\rho_c,\rho_k,\rho_{\min},\rho_{\max}$ & $\rho_c=0.7$ (baseline) & Compression ratio (global/adaptive and clipping bounds). \\
+$\delta$ & Design budget & Allowed semantic distortion budget in SASET. \\
+$I(\cdot;\cdot),\;\beta,\;\lambda,\;\mu,\;\pi_{\mathrm{ch}}$ & Tunable coefficients / policy & Mutual information, IB/Lagrangian trade-off weights, and channel-facing adaptation policy (compression/power/control). \\
+$C,\;B,\;C_s,\;\eta_s$ & Channel/semantic capacity terms & Shannon capacity, bandwidth, semantic capacity, and normalized semantic efficiency. \\
+$\ell(\cdot),\;\mathcal{L},\;\tilde{\mathcal{L}},\;\mathcal{R}$ & Objective functions & Task loss, clean risk, perturbed risk, and channel-aware risk. \\
+$g_k,\;\hat{g},\;\hat{g}_c,\;\hat{g}_s$ & Per-round gradients & Client gradients and aggregated client/server gradients. \\
+$J_t,\;\mathcal{T}_{\theta,zz},\;\Sigma_\epsilon$ & Higher-order sensitivity terms & Gradient Jacobian, mixed Hessian tensor term, and perturbation covariance. \\
+$L_s,\;L_\ell,\;L,\;L_g,\;L_J$ & Positive constants & Lipschitz/smoothness constants used in robustness and convergence bounds. \\
+$\sigma_d^2,\;\Gamma_T,\;F(\theta),\;F^*$ & Optimization analysis terms & Data-gradient variance, average inverse-SNR factor, objective value, optimal lower bound. \\
+$F,\;D_k,\;\Delta_{\mathrm{sem}},\;\Delta_{\mathrm{attack}}$ & Metric/robustness quantities & Semantic fidelity, representation distortion, semantic loss gap, attack-induced degradation. \\
+$\rho_{\mathrm{adv}},\;R_{\mathrm{adv}}$ & Attack-level dependent & Adversarial intensity and adversarial risk term in joint design objective. \\
+$\mathrm{Agg}\in\{\mathrm{Median},\mathrm{Krum},\mathrm{FLAME}\}$ & Defense choice & Server aggregation rule under adversarial settings. \\
+$\omega_1,\omega_2,\omega_3,\kappa,\tau_k,q_k$ & BCBSA internal coefficients & Trust-score weights, distortion penalty, trust score, and residual score. \\
+$B_{\mathrm{raw}},\;B_{\mathrm{tx}},\;B_{\mathrm{round}},\;C_{\mathrm{comm}}$ & Derived communication costs & Raw payload, compressed payload, per-round load, and communication cost. \\
+$\eta_E,\;R,\;T,\;T_{\mathrm{tx}},\;T_{\mathrm{proc}}$ & Performance metrics & Energy efficiency, rate, total latency, transmission time, processing time. \\
+$d_\theta,\;n,\;I_{\mathrm{geo}}$ & Complexity analysis terms & Gradient dimension, channel-symbol length, geometric-median iterations. \\
+$\gamma,\;\varepsilon_h,\;\varepsilon$ & Numerical stabilizers & Power-control target and small constants for robust normalization/division. \\
+\midrule
+Indexed variants (e.g., $z_k$, $\epsilon_t$, $g_{s,k}$) & Same base meaning by index & Subscripts $k$ and $t$ denote client and iteration specificity, respectively. \\
+\bottomrule
+\end{tabular}
+\end{table*}
+% ---------------------------------------------------------
+\section{Experimental Setup}
+This section describes the experimental configuration used to evaluate the proposed semantic channel learning (SCL) framework. The goal is to quantify the mapping
+\begin{equation}
+\left(\mathrm{SNR},\rho_{\mathrm{adv}},\mathrm{Agg}\right)
+\mapsto
+\left(\mathrm{Acc},F,C_{\mathrm{comm}}\right),
+\end{equation}
+where $\rho_{\mathrm{adv}}$ is attack intensity and $\mathrm{Agg}$ denotes the server aggregation rule.
+\subsection{Datasets}
+Experiments are conducted on two widely used image classification datasets\cite{lecun1998gradient,Krizhevsky09learningmultiple}.
+\begin{itemize}
+    \item MNIST: $X\in\mathbb{R}^{28\times28}$, $|\mathcal{D}_{\mathrm{train}}|=60{,}000$, $|\mathcal{D}_{\mathrm{test}}|=10{,}000$, and $|\mathcal{Y}|=10$\cite{lecun1998gradient}.
+    \item CIFAR-10: $X\in\mathbb{R}^{32\times32\times3}$, $|\mathcal{D}_{\mathrm{train}}|=50{,}000$, $|\mathcal{D}_{\mathrm{test}}|=10{,}000$, and $|\mathcal{Y}|=10$\cite{Krizhevsky09learningmultiple}.
+\end{itemize}
+To emulate a realistic distributed edge learning environment, the training set is partitioned across $K=50$ clients:
+\begin{equation}
+\begin{aligned}
+\mathcal{D}_{\mathrm{train}}&=\bigcup_{k=1}^{K}\mathcal{D}_k,
+\qquad
+\mathcal{D}_i\cap\mathcal{D}_j=\varnothing\;(i\neq j), \\
+|\mathcal{D}_k|&\approx\frac{|\mathcal{D}_{\mathrm{train}}|}{K}.
+\end{aligned}
+\end{equation}
+\subsection{Neural network architecture}
+The distributed learning system employs a split implementation of the ResNet-18 architecture adapted for CIFAR-10 image resolution\cite{he2016deepresidual}.
+\subsubsection{Client-Side Model}
+The client model $\mathcal{M}_{client}$ consists of the initial layers of ResNet-18\cite{he2016deepresidual}:
+\begin{itemize}
+\item Conv2D layer: $3 \rightarrow 64$, kernel $3\times3$, stride 1
+\item BatchNorm + ReLU
+\item Residual Block Layer1: $64 \rightarrow 64$ (2 blocks)
+\item Residual Block Layer2: $64 \rightarrow 128$ (stride 2)
+\end{itemize}
+The client encoder produces the smashed representation
+\begin{equation}
+\mathbf{s}_i \in \mathbb{R}^{128\times16\times16}.
+\end{equation}
+The smashed feature size is therefore
+\begin{equation}
+d_s = 128 \times 16 \times 16 = 32768.
+\end{equation}
+The corresponding per-sample payload before compression is
+\begin{equation}
+B_{\mathrm{raw}} = 32\,d_s = 1{,}048{,}576\;\text{bits} \approx 131\;\text{KB}.
+\end{equation}
+Using compression ratio $\rho_c=0.7$, the transmitted payload is
+\begin{equation}
+B_{\mathrm{tx}}=(1-\rho_c)B_{\mathrm{raw}}.
+\end{equation}
+\subsubsection{Server-Side Model}
+The server model $\mathcal{M}_{server}$ consists of the remaining layers of ResNet-18\cite{he2016deepresidual}:
+\begin{itemize}
+\item Residual Block Layer3: $128 \rightarrow 256$
+\item Residual Block Layer4: $256 \rightarrow 512$
+\item Adaptive Average Pooling
+\item Fully Connected Layer $512 \rightarrow 10$
+\end{itemize}
+The split between Layer2 and Layer3 provides a balanced trade-off between client computation and communication overhead.
+\subsection{Wireless channel model}
+Experiments follow the formal channel model already defined in Section III-C (Rayleigh fading + AWGN with semantic perturbation variance linked to SNR). We evaluate $\mathrm{SNR}\in\{10,20,30\}$ dB with per-client channel heterogeneity in the primary protocol, and include an extended sweep (0--30 dB) in the reviewer-response protocol.
+We explicitly acknowledge that the additive latent perturbation model
+\begin{equation}
+\epsilon\sim\mathcal{CN}\left(0,\frac{\alpha}{1+\mathrm{SNR}}I\right)
+\end{equation}
+is an abstraction of practical modem behavior. To avoid over-interpretation, we also include a bit-level digital pipeline baseline (denoted \texttt{sfl\_digital}) that performs modulation/coding before transmission and decoding at the receiver. Thus, the manuscript reports both a semantic-layer abstraction and a digital communication reference.
+\subsection{Adversarial attack models}
+To evaluate robustness against malicious participants, several adversarial attack scenarios are considered\cite{fang2020localmodelpoisoning,bagdasaryan2020backdoor}.
+\begin{itemize}
+    \item Weight poisoning attack: malicious clients transmit perturbed updates $g_k^{\mathrm{adv}}=g_k+\delta_k$ to bias global learning\cite{fang2020localmodelpoisoning}.
+    \item Label poisoning attack: local labels are corrupted by a mapping $y' = \pi(y)$ with $\pi(y)\neq y$, injecting incorrect supervision\cite{bagdasaryan2020backdoor}.
+    \item SMASH attack: transmitted representations are manipulated as $\tilde{z}_k^{\mathrm{adv}}=\tilde{z}_k+\delta_{z,k}$ to corrupt semantic information flow\cite{10741277}.
+\end{itemize}
+\subsection{Defense mechanisms}
+To mitigate adversarial behavior, the following robust aggregation mechanisms are evaluated\cite{blanchard2017krum,yin2018byzantine,nguyen2022flame}. We additionally introduce a bias-aware semantic defense in Algorithm~\ref{alg:bcbsa}.
+\begin{equation}
+\begin{aligned}
+\hat{g}_t &= \mathrm{Agg}\big(\{g_{k,t}\}_{k=1}^{K}\big), \\
+\mathrm{Agg} &\in\{\mathrm{Median},\mathrm{Krum},\mathrm{FLAME}\}.
+\end{aligned}
+\end{equation}
+This abstraction enables direct robustness comparison under identical training and channel conditions.
+\begin{itemize}
+\item Median aggregation: Coordinate-wise median aggregation to suppress extreme updates\cite{yin2018byzantine}.
+\item Krum aggregation: Byzantine-resilient aggregation that selects the most consistent updates among clients\cite{blanchard2017krum}.
+\item FLAME Defense: A clustering-based defense mechanism that detects and removes malicious client updates\cite{nguyen2022flame}.
+\end{itemize}
+\begin{algorithm}[t]
+\caption{Proposed Bias-Compensated Byzantine Semantic Aggregation (BCBSA)}
+\label{alg:bcbsa}
+\begin{algorithmic}[1]
+\REQUIRE Gradient-statistic tuples $\mathcal{G}=\{(g_k,F_k,D_k)\}_{k=1}^{K}$, Byzantine bound $f_{\max}$, weights $(\omega_1,\omega_2,\omega_3)$, penalty $\kappa$
+\ENSURE Aggregated gradient $\hat{g}$
+\FOR{each client $k=1,\ldots,K$}
+\STATE Compute semantic trust score\[\tau_k \leftarrow \omega_1F_k + \frac{\omega_2}{1+D_k} - \omega_3\|g_k\|_2\]
+\ENDFOR
+\STATE Build candidate set $\mathcal{S}$ with top $(K-f_{\max})$ clients by $\tau_k$
+\STATE Compute robust center $c \leftarrow \operatorname{GeoMed}(\{g_k\}_{k\in\mathcal{S}})$
+\FOR{each $k\in\mathcal{S}$}
+\STATE Compute residual score\[q_k \leftarrow \|g_k-c\|_2 + \kappa D_k\]
+\ENDFOR
+\STATE Select refined set $\mathcal{R}$ with smallest $(K-f_{\max})$ values in $\{q_k\}_{k\in\mathcal{S}}$
+\STATE Compute weighted aggregate\[\hat{g} \leftarrow \frac{\sum_{k\in\mathcal{R}}\max(\tau_k,0)g_k}{\sum_{k\in\mathcal{R}}\max(\tau_k,0)+\varepsilon}\]
+\RETURN $\hat{g}$
+\end{algorithmic}
+\end{algorithm}
+Algorithm~\ref{alg:bcbsa} is executed within the same training protocol used by all baselines; in this revision we explicitly separate full BCBSA from its no-semantic ablation to avoid conflating robust filtering effects with semantic-trust effects.
+\subsection{Comparative baselines and implementation details}
+To align with recent wireless FL and semantic-communication literature, we evaluate three baseline families in one unified framework: (i) communication-unaware FL/SFL baselines (FedAvg, FedProx, \texttt{standard\_fl}), (ii) classical Byzantine-robust FL baselines (Median, Krum, FLAME, AMD), and (iii) channel-aware semantic variants (SC$^2$-SFL + SASET + BCBSA, \texttt{sfl\_semantic}, \texttt{sfl\_no\_channel}, \texttt{sfl\_digital}). This creates a reproducible comparison space spanning learning-only, robust-aggregation-only, and semantic-channel-aware design choices\cite{8736011,11134601,9398576,10798108}.
+To resolve protocol ambiguity, we report two explicitly separated regimes in Table~\ref{tab:protocols}.
+\begin{table}[htbp]
+\centering
+\caption{Two experimental protocols reported in this revision}
+\label{tab:protocols}
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{p{0.16\columnwidth}p{0.19\columnwidth}p{0.22\columnwidth}p{0.35\columnwidth}}
+\toprule
+\textbf{Protocol} & \textbf{Training budget} & \textbf{Typical CIFAR-10 range} & \textbf{Use in paper} \\
+\midrule
+P1 (full) & 50 rounds, warmup+cosine SGD & 74--79\% (attack/defense dependent) & Primary robustness and defense-ranking conclusions \\
+P2 (short-budget) & 10-epoch reviewer-response runs & 18--22\% across communication variants & Reproducibility stress test and hypothesis testing \\
+\bottomrule
+\end{tabular}
+\end{table}
+Unless otherwise noted, attack-defense matrices and convergence plots use P1. Direct communication-variant significance tests use P2 to avoid mixing training budgets.
+For BCBSA fairness, we additionally define an ablation without semantic signals by setting $(\omega_1,\omega_2)=(0,0)$ and keeping the same robust center/refinement pipeline; this isolates the effect of semantic trust terms from FLAME-like robust filtering.
+\subsection{Hyperparameter selection and sensitivity analysis}
+Key SCL coefficients are tuned by validation-based grid search using a joint criterion that balances clean accuracy, attacked accuracy, and communication cost. Table~\ref{tab:coeff_tuning} reports the ranges and selected defaults used in all main experiments.
+\begin{table}[htbp]
+\centering
+\caption{Key SCL coefficients: tuning ranges and selected defaults}
+\label{tab:coeff_tuning}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{p{0.09\columnwidth}p{0.26\columnwidth}p{0.23\columnwidth}p{0.34\columnwidth}}
+\toprule
+\textbf{Coeff.} & \textbf{Role} & \textbf{Search range} & \textbf{Selected default} \\
+\midrule
+$\alpha$ & Channel-distortion scaling in $\sigma_\epsilon^2$ & $[0.5,2.0]$ & 1.0 (matches observed fidelity/BER trend) \\
+$\beta$ & IB relevance weight & $[0.5,2.0]$ & 1.0 (balanced compression/relevance) \\
+$\lambda$ & Compression regularization & $[10^{-3},5\times10^{-2}]$ & $10^{-2}$ \\
+$\mu$ & Semantic-distortion penalty & $[10^{-3},5\times10^{-2}]$ & $10^{-2}$ \\
+$\gamma$ & SASET power-control target & $[0.5,2.0]$ & 1.0 \\
+$\kappa$ & BCBSA distortion penalty & $[0.05,0.5]$ & 0.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+Sensitivity checks confirm stable qualitative behavior. For stronger perturbation validation, weight-attack strength sweeps ($0.5\rightarrow10.0$) with FLAME show a monotonic drop from $75.1\%$ to $52.1\%$ while preserving the same defense ranking trend. Malicious-ratio sweeps (10\% to 60\%) show graceful degradation up to 40\% and clear breakdown near 50\%. SMASH $\epsilon$ sweeps show a beneficial regularization region ($\epsilon\in[0.2,0.5]$) and degradation for large perturbations ($\epsilon\ge1.0$).
+\subsection{Evaluation metrics}
+We evaluate system performance using several metrics that jointly capture learning accuracy, communication efficiency, and representation robustness.
+\begin{itemize}
+    \item Classification accuracy: Classification accuracy measures the predictive performance of the trained model on the test dataset and is defined as
+\begin{equation}
+\text{Accuracy} = \frac{N_{\text{correct}}}{N_{\text{total}}}
+\end{equation}
+where $N_{\text{correct}}$ denotes the number of correctly classified samples.
+\item Semantic fidelity: Semantic fidelity quantifies the similarity between transmitted and received semantic representations and is defined as
+\begin{equation}
+F = 1 - \frac{\|z-\tilde{z}\|^2}{\|z\|^2}
+\end{equation}
+where $z$ denotes the original representation and $\tilde{z}$ denotes the received representation after channel transmission.
+\item Communication cost: Communication cost measures the number of transmitted bits per training round and is defined as
+\begin{equation}
+C_{\text{comm}} = K \cdot d
+\end{equation}
+where $K$ denotes the number of participating clients and $d$ denotes the dimension of the transmitted representation.
+\item Energy efficiency: Energy efficiency measures the number of transmitted bits per unit energy and is defined as
+\begin{equation}
+\eta_E = \frac{R}{P}
+\end{equation}
+where $R$ represents the transmission rate and $P$ represents transmission power.
+\item Latency: End-to-end communication latency is measured as
+\begin{equation}
+T = T_{\text{tx}} + T_{\text{proc}}
+\end{equation}
+where $T_{\text{tx}}$ represents transmission time and $T_{\text{proc}}$ represents computation time.
+\end{itemize}
+% ---------------------------------------------------------
+\section{Results and Analysis}
+This section presents experimental results evaluating the proposed semantic channel learning (SCL) framework. The objective is to characterize
+\begin{equation}
+\mathrm{Acc}=\Psi(\mathrm{SNR},F,\rho_{\mathrm{adv}},\mathrm{Agg})
+\end{equation}
+and to test which effects are statistically supported versus only trend-level. We separate protocol-matched conclusions (P2) from full-training robustness results (P1).
+\subsection{Direct SCL-versus-baseline comparison (P2)}
+Table~\ref{tab:direct_baselines_p2} provides the missing direct method comparison requested by the reviewer, using the same short-budget protocol for all methods.
+\begin{table}[htbp]
+\centering
+\caption{Direct communication-variant comparison under protocol P2}
+\label{tab:direct_baselines_p2}
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{p{0.28\columnwidth}p{0.22\columnwidth}p{0.2\columnwidth}p{0.2\columnwidth}}
+\toprule
+\textbf{Method} & \textbf{Channel treatment} & \textbf{CIFAR-10 final acc.} & \textbf{Statistical note} \\
+\midrule
+SC$^2$-SFL (\texttt{sfl\_semantic}) & Semantic latent perturbation model & 17.87\% $\rightarrow$ 18.69\% (0--30 dB sweep) & Reference method \\
+\texttt{sfl\_digital} & Bit/symbol-level digital channel pipeline & 18--22\% range & $p\approx0.062$ vs \texttt{sfl\_semantic} \\
+\texttt{sfl\_no\_channel} & Idealized no-channel perturbation & 18--22\% range & $p\approx0.062$ vs \texttt{sfl\_semantic} \\
+\texttt{standard\_fl} & Full-model FL baseline & 18--22\% range & $p\approx0.062$ vs \texttt{sfl\_semantic} \\
+\bottomrule
+\end{tabular}
+\end{table}
+The key conclusion from P2 is negative-but-informative: under short training budgets, we do not observe statistically significant separation between semantic and non-semantic communication variants.
+\subsection{Hypothesis testing results (P2)}
+To avoid over-claiming gains, Table~\ref{tab:hypothesis_p2} reports the hypothesis outcomes directly.
+\begin{table}[htbp]
+\centering
+\caption{Summary of reviewer-response hypothesis tests (P2)}
+\label{tab:hypothesis_p2}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{p{0.54\columnwidth}p{0.16\columnwidth}p{0.22\columnwidth}}
+\toprule
+\textbf{Test} & \textbf{$p$-value} & \textbf{Decision at $\alpha=0.05$} \\
+\midrule
+\texttt{sfl\_semantic} vs \texttt{sfl\_digital} & $\approx0.062$ & Not significant \\
+\texttt{sfl\_semantic} vs \texttt{sfl\_no\_channel} & $\approx0.062$ & Not significant \\
+\texttt{sfl\_semantic} vs \texttt{standard\_fl} & $\approx0.062$ & Not significant \\
+Split-point comparison (semantic variant) & $\approx0.062$ & Not significant \\
+Communication-variant omnibus comparison & $\approx0.062$ & Not significant \\
+\bottomrule
+\end{tabular}
+\end{table}
+Accordingly, this revision treats P2 as a stress-test regime and does not claim superiority of SCL from these runs.
+\subsection{Accuracy under wireless channel conditions}
+We next report channel trends under P1 and compare them with the extended P2 sweep.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{\detokenize{ieee-docs-jor/figures/cifar10/fig5_snr_impact_accuracy.pdf}}
+\caption{CIFAR-10 accuracy under channel qualities $\mathrm{SNR}=10,20,30$ dB.}
+\label{fig:snr_accuracy}
+\end{figure}
+From the full result matrix, mean accuracy across all attack-defense configurations is
+\begin{equation}
+\bar{A}_{10\mathrm{dB}}=66.36\%,
+\quad
+\bar{A}_{20\mathrm{dB}}=65.82\%,
+\quad
+\bar{A}_{30\mathrm{dB}}=66.02\%.
+\end{equation}
+Hence, the empirical SNR sensitivity is small:
+\begin{equation}
+\Delta_{\mathrm{SNR}}^{\mathrm{emp}}
+\triangleq
+\max_s \bar{A}_s-\min_s \bar{A}_s
+=0.54\%.
+\end{equation}
+In the P2 extended sweep, \texttt{sfl\_semantic} increases from $17.87\%$ (0 dB) to $18.69\%$ (30 dB), i.e.,
+\begin{equation}
+\Delta_{\mathrm{SNR,P2}}^{\mathrm{emp}}=0.82\%.
+\end{equation}
+At the same time, semantic fidelity increases from $97.00\%$ to $99.96\%$ and BER decreases from $18.2\%$ to $9.1\%$. Therefore, the empirical message is bounded-response behavior in this operating region, not strong SNR sensitivity of accuracy.
+Fig.~\ref{fig:snr_accuracy} is therefore interpreted as a bounded-response curve:
+\begin{equation}
+\left|\mathrm{Acc}(\mathrm{SNR}_1)-\mathrm{Acc}(\mathrm{SNR}_2)\right|
+\le
+0.54\%,
+\quad
+\mathrm{SNR}_1,\mathrm{SNR}_2\in\{10,20,30\}\,\mathrm{dB}.
+\end{equation}
+This is consistent with the Section V bound
+\begin{equation}
+\Delta\ell
+\lesssim
+L_\ell L_s\sqrt{\frac{d_z\alpha}{1+\mathrm{SNR}}}.
+\end{equation}
+Theorem~1 and Theorem~3 are thus used as qualitative trend bounds. Quantitative calibration requires estimating $(L_\ell,L_s,L_g)$ and separating data-noise and channel-noise contributions, which we now state as an open experimental requirement.
+\subsection{Semantic fidelity and cross-dataset sanity checks}
+To further analyze the relationship between communication reliability and learning performance, we measure semantic fidelity between transmitted and received representations.
+Cross-dataset clean-condition fidelity is high (MNIST: $0.9889$, CIFAR-10: $0.9888$), and Fig.~\ref{fig:fidelity_accuracy} shows an overall positive association between fidelity and accuracy, i.e.,
+\begin{equation}
+\operatorname{corr}\!\left(F,\mathrm{Acc}\right)>0.
+\end{equation}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{\detokenize{SCL figures/results/fig2_semantic_fidelity_vs_accuracy.pdf}}
+\caption{Semantic fidelity versus classification accuracy across representative attack-defense settings.}
+\label{fig:fidelity_accuracy}
+\end{figure}
+However, fidelity alone is not sufficient: at 10 dB, FedAvg improves from $76.27\%$ (clean) to $78.20\%$ (SMASH with $\epsilon=0.3$) while fidelity slightly decreases (from $0.9703$ to $0.9692$). This behavior is consistent with Theorem~2 and the semantic-capacity view: task utility depends on task-relevant information $I(\tilde{Z};Y)$, not on bit-level or cosine-level fidelity alone.
+To address cross-dataset reporting consistency, Fig.~\ref{fig:cross_dataset_comparison} summarizes essential MNIST and CIFAR-10 findings under the same analysis pipeline.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{\detokenize{ieee-docs-jor/figures/comparison/fig9_cross_dataset_essential_comparison.pdf}}
+\caption{Cross-dataset essential findings (MNIST and CIFAR-10) under a unified attack-defense analysis setup.}
+\label{fig:cross_dataset_comparison}
+\end{figure}
+\subsection{Robustness under adversarial attacks}
+We next evaluate robustness under weight poisoning, label poisoning, and SMASH attacks.
+Using FedAvg as reference, the measured attack impacts are:
+\begin{equation}
+\begin{aligned}
+\Delta_{\mathrm{weight}}&=-36.37\%\;(74.82\%\rightarrow38.45\%), \\
+\Delta_{\mathrm{label}}&=-1.22\%,
+\qquad
+\Delta_{\mathrm{smash}}=+3.13\%.
+\end{aligned}
+\end{equation}
+Thus, weight poisoning is the dominant threat in our setting, while moderate SMASH perturbation behaves like regularization. Fig.~\ref{fig:attack_severity} is therefore summarized by
+\begin{equation}
+\frac{\partial\,\mathrm{Acc}}{\partial\rho_{\mathrm{adv}}}<0,
+\end{equation}
+where attack-induced gradient bias causes the largest degradation for weight poisoning. This empirical behavior is aligned with Theorem~4 ($\mathbb{E}[\nabla\tilde{\mathcal{L}}]\neq\nabla\mathcal{L}$ under perturbation/bias).
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{\detokenize{ieee-docs-jor/figures/cifar10/fig2_attack_defense_heatmap_nofltrust.pdf}}
+\caption{Accuracy matrix across attacks and defenses: no attack, weight, label, and SMASH poisoning (CIFAR-10).}
+\label{fig:attack_severity}
+\end{figure}
+However, the degradation depends strongly on the aggregation rule. Robust aggregation (especially FLAME) reduces attack sensitivity compared with naive aggregation, i.e.,
+\begin{equation}
+\Delta_{\mathrm{attack}}^{\mathrm{robust}} < \Delta_{\mathrm{attack}}^{\mathrm{naive}}.
+\end{equation}
+These findings indicate that robust aggregation is a key requirement for secure open-wireless deployment.
+\subsection{Defense mechanism comparison}
+To analyze the effectiveness of different defense strategies, we first compare six canonical aggregation rules: FedAvg, Median, Krum, AMD, FLAME, and FedProx (P1 protocol).
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{\detokenize{ieee-docs-jor/figures/cifar10/fig4_defense_comparison_nofltrust.pdf}}
+\caption{Per-defense final accuracy under no attack, weight poisoning, label poisoning, and SMASH poisoning (CIFAR-10).}
+\label{fig:defense_comparison}
+\end{figure}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{\detokenize{ieee-docs-jor/figures/cifar10/fig3_convergence_trajectories.pdf}}
+\caption{Training accuracy trajectories for representative clean and adversarial cases (CIFAR-10).}
+\label{fig:convergence_profiles}
+\end{figure}
+Fig.~\ref{fig:convergence_profiles} highlights that robust methods maintain more stable convergence under adversarial conditions, while non-robust baselines degrade or plateau early.
+Fig.~\ref{fig:defense_comparison} presents the classification accuracy achieved by each defense method under adversarial conditions. Under weight poisoning, the averaged ranking is FLAME ($73.29\%$) $>$ Krum ($60.81\%$) $>$ AMD ($53.21\%$) $>$ FedAvg ($38.45\%$) $>$ FedProx ($37.01\%$) $>$ Median ($10.00\%$).
+Across evaluated attacks, the best average defense is
+\begin{equation}
+\bar{A}_{\mathrm{FLAME}}
+=
+\max_{a\in\{\mathrm{FedAvg},\mathrm{Median},\mathrm{Krum},\mathrm{AMD},\mathrm{FLAME},\mathrm{FedProx}\}} \bar{A}_a,
+\end{equation}
+due to clustering-based filtering of anomalous client updates in this specific attack budget.
+Most importantly, the median collapse provides a concrete instance consistent with Theorem~5. In our setup,
+\begin{equation}
+\frac{f}{N}=\frac{15}{50}=0.3<\frac{1}{2},
+\qquad
+A_{\mathrm{median,weight}}=10.00\%,
+\end{equation}
+and this failure is not confined to one channel point. Across all tested SNR levels,
+\begin{equation}
+A_{\mathrm{median,weight}}^{\{10,20,30\}\mathrm{dB}}
+=
+\{10.00\%,\,10.00\%,\,10.00\%\},
+\end{equation}
+while FLAME remains around $\sim73\%$ under the same attack budget. Moreover, at 10 dB the median defense briefly peaks at $32.54\%$ and then collapses to chance-level accuracy, matching the unstable trajectory in Fig.~\ref{fig:convergence_profiles}. This behavior is aligned with the counterexample logic of Theorem~5, but does not by itself quantify how often such failure occurs across all data distributions.
+\vspace{-0.6cm}
+\subsection{BCBSA ablation and attribution}\vspace{-0.1cm}
+To isolate the contribution of semantic trust signals $(F_k,D_k)$, we compare full BCBSA with the no-semantic ablation $(\omega_1,\omega_2)=(0,0)$ under matched training settings. In the short-budget P2 protocol, their differences are within run variance (non-significant at $\alpha=0.05$), so this revision avoids claiming standalone BCBSA superiority from P2. In P1, BCBSA follows the same robust-filtering trend as FLAME-like methods, suggesting that semantic signals are a potentially useful but not yet universally dominant factor; stronger evidence requires larger-run statistical power.\vspace{-0.5cm}
+\subsection{Communication efficiency}
+A key advantage of SCL is reduced communication overhead through semantic representation transmission. The per-round cost is
+\begin{equation}
+C_{\mathrm{comm}}^{\mathrm{SCL}} = K\,B_{\mathrm{tx}},
+\qquad
+B_{\mathrm{tx}}=(1-\rho_c)\,32\,d_s,
+\end{equation}
+which is typically lower than transmitting full-model updates in standard FL.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{\detokenize{ieee-docs-jor/figures/cifar10/fig7_runtime_overhead_nofltrust.pdf}}
+\caption{Normalized runtime overhead versus robustness under weight poisoning (CIFAR-10).}
+\label{fig:communication_efficiency}
+\end{figure}
+Fig.~\ref{fig:communication_efficiency} shows the security--latency trade-off: FedAvg ($1.00\times$), Krum ($\approx1.01\times$), Median ($\approx1.05\times$), AMD ($\approx1.14\times$), FedProx ($\approx1.18\times$), and FLAME ($\approx1.36\times$). Thus, FLAME provides strongest robustness at the highest computational overhead.
+\section{Discussion}
+The revised evidence should be read in two regimes. In full-training P1, robust-aggregation differences are clear (e.g., FLAME versus Median under weight poisoning), and semantic-fidelity trends are stable. In short-budget P2, direct communication-variant comparisons are statistically non-significant ($p\approx0.062$), so we do not claim universal SCL superiority under constrained training.
+The observed small SNR sensitivity ($\Delta_{\mathrm{SNR}}^{\mathrm{emp}}=0.54\%$ in P1; $0.82\%$ in P2 semantic sweep) indicates bounded-response behavior in the tested operating range rather than strong channel-driven accuracy scaling. This is consistent with, but not a tight numerical confirmation of, Theorems~1--3.
+These findings imply that semantic transmission, channel adaptation, and robust aggregation should be optimized jointly in wireless edge systems, with explicit reporting of training budget and statistical power. A compact design objective is
+\begin{equation}
+\max_{\theta,\,\pi_{\mathrm{ch}},\,\mathrm{Agg}}
+\Big(\mathrm{Acc}
+-\lambda C_{\mathrm{comm}}
+-\mu R_{\mathrm{adv}}\Big),
+\end{equation}
+which requires joint learning--communication optimization rather than separate tuning\cite{8865093,10255264}. SCL instantiates this principle through semantic transmission, channel awareness, and robust aggregation\cite{8736011,9952954,8839651,8865093}.
+% ---------------------------------------------------------
+\section{Conclusion}
+This paper presented semantic channel learning (SCL), a communication-aware framework for distributed learning over wireless networks. Instead of treating communication as a separate transport layer, SCL models intermediate split-learning representations as semantic information flows and embeds channel dynamics directly into the training process. Using an information-theoretic lens, we connected representation learning to wireless transmission through the information bottleneck principle and introduced the semantic capacity of learning systems. This notion captures how much task-relevant information can be preserved and transmitted reliably under channel constraints.
+
+Our analysis showed that channel perturbations lead to bounded prediction changes under standard Lipschitz assumptions and that training remains stable under bounded channel-induced gradient noise. Primary CIFAR-10 experiments and supplementary MNIST sanity checks show high semantic fidelity, while adversarial results highlight that robustness is strongly aggregation-dependent. Full-training runs demonstrate clear defense-dependent robustness behavior, while short-budget runs show non-significant differences among communication variants. This distinction resolves the protocol discrepancy and narrows claims to what is statistically supported. Overall, SCL provides a practical co-design perspective for reliable and communication-efficient edge intelligence. The framework can be summarized as
+\begin{equation}
+(\theta_c^*,\theta_s^*)=\arg\max_{\theta_c,\theta_s}\Big(I(\tilde{Z};Y)-\lambda I(X;Z)-\mu\,\mathbb{E}\|\tilde{Z}-Z\|^2\Big).
+\end{equation}
+
+Future work will focus on (i) tighter theorem-to-experiment calibration through estimated Lipschitz/variance constants, (ii) full digital physical-layer channel modeling with OFDM/QAM in-loop training, (iii) higher-power ablation studies for BCBSA semantic terms, and (iv) extension to large foundation and multimodal models for next-generation wireless networks.
+
+% establishing under full duplex
+
+
+% ---------------------------------------------------------
+
+% ---------------------------------------------------------
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
