@@ -29,7 +29,8 @@ This repository contains the complete implementation of the five experiment grou
 8. [Outputs](#outputs)
 9. [Running Tests](#running-tests)
 10. [Citation](#citation)
-11. [License](#license)
+11. [Changelog](#changelog)
+12. [License](#license)
 
 ---
 
@@ -437,6 +438,18 @@ If you use this code or experimental design in your work, please cite:
   note    = {Code: \url{https://github.com/ispandey/scl-experiment}}
 }
 ```
+
+---
+
+## Changelog
+
+### 2026-04-14
+
+- **`scl/metrics/information.py` — semantic efficiency unit fix.**  
+  `semantic_efficiency()` now correctly converts I(Z̃;Y) from **nats to bits** (÷ ln 2) before dividing by the Shannon capacity *C* (bits). The previous implementation compared nats directly to bits, producing an η_s value inflated by a factor of ~1.44 (= ln 2⁻¹ ≈ 1.4427).
+
+- **`scl/models/resnet.py` — smash-shape docstring correction.**  
+  `ResNet18Client` docstring spatial dimensions were wrong for 32×32 CIFAR input (listed as 64×32×32 / 128×16×16 / 256×8×8). Corrected to match actual output of the torchvision 7×7 stride-2 stem + MaxPool2d: **64×8×8 / 128×4×4 / 256×2×2**.
 
 ---
 
