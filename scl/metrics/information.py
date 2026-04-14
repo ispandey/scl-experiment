@@ -70,10 +70,16 @@ def semantic_efficiency(
 ) -> float:
     """
     η_s(SNR) = I(Z̃;Y) / C(SNR)   where C = B·log₂(1+SNR).
+
+    IZtildeY is produced by ib_IZtildeY() in nats (natural-log units).
+    Shannon capacity C is in bits (log₂ units).  Convert nats to bits
+    by dividing by ln(2) before forming the ratio so both quantities
+    share the same unit.
     """
     snr = 10 ** (snr_db / 10.0)
     C = bandwidth * math.log2(1.0 + snr + 1e-8)
-    return IZtildeY / (C + 1e-8)
+    IZtildeY_bits = IZtildeY / math.log(2)  # nats → bits
+    return IZtildeY_bits / (C + 1e-8)
 
 
 def estimate_sigma_z(

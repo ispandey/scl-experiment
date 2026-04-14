@@ -1031,7 +1031,7 @@ $f,\;N,\;f_{\max}$ & Scenario-dependent & Byzantine client count, total clients,
 $f_c(\cdot),\;f_s(\cdot)$ & ResNet-18 split & Client-side and server-side subnetworks. \\
 $\theta_c,\;\theta_s,\;\theta$ & Learned parameters & Client, server, and joint model parameters. \\
 $Z,\tilde{Z},\;z_k,\tilde{z}_k$ & Learned latent representations & Semantic representation before/after channel perturbation. \\
-$d_z,\;d_s$ & Model-dependent, $d_s=32768$ & Semantic latent dimension and smashed-feature size. \\
+$d_z,\;d_s$ & Model-dependent, $d_s=2048$ & Semantic latent dimension and smashed-feature size. \\
 $\mathcal{M}_k(\cdot),\;\mathcal{D}_k(\cdot)$ & Encoder/decoder mappings & Channel modulation and demodulation mappings. \\
 $s_k,\;r_k$ & Complex channel symbols & Transmitted and received channel vectors. \\
 $h_k,\;n_k,\;\epsilon_k$ & Rayleigh/AWGN model & Fading gain, additive channel noise, and semantic perturbation. \\
@@ -1051,7 +1051,7 @@ $\sigma_d^2,\;\Gamma_T,\;F(\theta),\;F^*$ & Optimization analysis terms & Data-g
 $F,\;D_k,\;\Delta_{\mathrm{sem}},\;\Delta_{\mathrm{attack}}$ & Metric/robustness quantities & Semantic fidelity, representation distortion, semantic loss gap, attack-induced degradation. \\
 $\rho_{\mathrm{adv}},\;R_{\mathrm{adv}}$ & Attack-level dependent & Adversarial intensity and adversarial risk term in joint design objective. \\
 $\mathrm{Agg}\in\{\mathrm{Median},\mathrm{Krum},\mathrm{FLAME}\}$ & Defense choice & Server aggregation rule under adversarial settings. \\
-$\omega_1,\omega_2,\omega_3,\kappa,\tau_k,q_k$ & BCBSA internal coefficients & Trust-score weights, distortion penalty, trust score, and residual score. \\
+$\omega_1,\omega_2,\omega_3,\tau,\eta$ & BCBSA internal coefficients & Trust-score weights, acceptance threshold, and temporal EMA rate. \\
 $B_{\mathrm{raw}},\;B_{\mathrm{tx}},\;B_{\mathrm{round}},\;C_{\mathrm{comm}}$ & Derived communication costs & Raw payload, compressed payload, per-round load, and communication cost. \\
 $\eta_E,\;R,\;T,\;T_{\mathrm{tx}},\;T_{\mathrm{proc}}$ & Performance metrics & Energy efficiency, rate, total latency, transmission time, processing time. \\
 $d_\theta,\;n,\;I_{\mathrm{geo}}$ & Complexity analysis terms & Gradient dimension, channel-symbol length, geometric-median iterations. \\
@@ -1090,22 +1090,22 @@ The distributed learning system employs a split implementation of the ResNet-18 
 \subsubsection{Client-Side Model}
 The client model $\mathcal{M}_{client}$ consists of the initial layers of ResNet-18\cite{he2016deepresidual}:
 \begin{itemize}
-\item Conv2D layer: $3 \rightarrow 64$, kernel $3\times3$, stride 1
-\item BatchNorm + ReLU
+\item Conv2D layer: $3 \rightarrow 64$, kernel $7\times7$, stride 2, padding 3
+\item BatchNorm + ReLU + MaxPool2d ($3\times3$, stride 2)
 \item Residual Block Layer1: $64 \rightarrow 64$ (2 blocks)
 \item Residual Block Layer2: $64 \rightarrow 128$ (stride 2)
 \end{itemize}
 The client encoder produces the smashed representation
 \begin{equation}
-\mathbf{s}_i \in \mathbb{R}^{128\times16\times16}.
+\mathbf{s}_i \in \mathbb{R}^{128\times4\times4}.
 \end{equation}
 The smashed feature size is therefore
 \begin{equation}
-d_s = 128 \times 16 \times 16 = 32768.
+d_s = 128 \times 4 \times 4 = 2048.
 \end{equation}
 The corresponding per-sample payload before compression is
 \begin{equation}
-B_{\mathrm{raw}} = 32\,d_s = 1{,}048{,}576\;\text{bits} \approx 131\;\text{KB}.
+B_{\mathrm{raw}} = 32\,d_s = 65{,}536\;\text{bits} = 8\;\text{KB}.
 \end{equation}
 Using compression ratio $\rho_c=0.7$, the transmitted payload is
 \begin{equation}
@@ -1152,18 +1152,17 @@ This abstraction enables direct robustness comparison under identical training a
 \caption{Proposed Bias-Compensated Byzantine Semantic Aggregation (BCBSA)}
 \label{alg:bcbsa}
 \begin{algorithmic}[1]
-\REQUIRE Gradient-statistic tuples $\mathcal{G}=\{(g_k,F_k,D_k)\}_{k=1}^{K}$, Byzantine bound $f_{\max}$, weights $(\omega_1,\omega_2,\omega_3)$, penalty $\kappa$
+\REQUIRE Gradient-statistic tuples $\mathcal{G}=\{(g_k,F_k,D_k)\}_{k=1}^{K}$, weights $(\omega_1,\omega_2,\omega_3)$, acceptance threshold $\tau$, EMA rate $\eta$, reference gradient $\hat{g}^{t-1}$ (EMA of previous accepted mean)
 \ENSURE Aggregated gradient $\hat{g}$
 \FOR{each client $k=1,\ldots,K$}
-\STATE Compute semantic trust score\[\tau_k \leftarrow \omega_1F_k + \frac{\omega_2}{1+D_k} - \omega_3\|g_k\|_2\]
+\STATE Compute normalised distortion $\bar{D}_k \leftarrow \min\!\left(1,\,\frac{\|\tilde{z}_k-z_k\|^2}{d_z}\right)$
+\STATE Compute raw semantic trust score\[\tau_k^{\mathrm{raw}} \leftarrow \omega_1\max(0,F_k) + \omega_2(1-\bar{D}_k) + \omega_3\max\!\left(0,\cos(g_k,\hat{g}^{t-1})\right)\]
+\STATE Apply temporal EMA\[\tau_k \leftarrow (1-\eta)\tau_k^{t-1} + \eta\,\tau_k^{\mathrm{raw}}\]
 \ENDFOR
-\STATE Build candidate set $\mathcal{S}$ with top $(K-f_{\max})$ clients by $\tau_k$
-\STATE Compute robust center $c \leftarrow \operatorname{GeoMed}(\{g_k\}_{k\in\mathcal{S}})$
-\FOR{each $k\in\mathcal{S}$}
-\STATE Compute residual score\[q_k \leftarrow \|g_k-c\|_2 + \kappa D_k\]
-\ENDFOR
-\STATE Select refined set $\mathcal{R}$ with smallest $(K-f_{\max})$ values in $\{q_k\}_{k\in\mathcal{S}}$
-\STATE Compute weighted aggregate\[\hat{g} \leftarrow \frac{\sum_{k\in\mathcal{R}}\max(\tau_k,0)g_k}{\sum_{k\in\mathcal{R}}\max(\tau_k,0)+\varepsilon}\]
+\STATE Build accepted set $\mathcal{A} \leftarrow \{k : \tau_k > \tau\}$; if $\mathcal{A}=\varnothing$ set $\mathcal{A}\leftarrow\{1,\ldots,K\}$
+\STATE Compute softmax weights $w_k \leftarrow \exp(\tau_k)/\sum_{j\in\mathcal{A}}\exp(\tau_j)$ for $k\in\mathcal{A}$
+\STATE Compute weighted aggregate\[\hat{g} \leftarrow \sum_{k\in\mathcal{A}} w_k\, g_k\]
+\STATE Update reference gradient $\hat{g}^t \leftarrow \hat{g}$
 \RETURN $\hat{g}$
 \end{algorithmic}
 \end{algorithm}

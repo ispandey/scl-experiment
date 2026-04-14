@@ -26,10 +26,14 @@ class ResNet18Client(nn.Module):
     """
     Client-side of ResNet-18, split after a chosen layer.
 
+    The standard torchvision ResNet-18 stem uses a 7×7 stride-2 conv followed
+    by a 3×3 stride-2 MaxPool, halving spatial resolution twice before the
+    residual blocks.  For a 32×32 CIFAR input the actual smash shapes are:
+
     split_layer:
-        1 -> outputs after layer1  (64  × 32×32 for 32×32 input)
-        2 -> outputs after layer2  (128 × 16×16 for 32×32 input)  [PRIMARY]
-        3 -> outputs after layer3  (256 × 8×8  for 32×32 input)
+        1 -> outputs after layer1  (64  × 8×8 for 32×32 input)
+        2 -> outputs after layer2  (128 × 4×4 for 32×32 input)  [PRIMARY]
+        3 -> outputs after layer3  (256 × 2×2 for 32×32 input)
     """
 
     def __init__(self, split_layer: int = 2):
