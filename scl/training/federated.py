@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -105,7 +106,7 @@ class FederatedTrainer:
 
         # Root loader for FLTrust
         self._pin_memory = _is_cuda_device(device)
-        self._num_workers = min(4, __import__("os").cpu_count() or 1)
+        self._num_workers = min(4, os.cpu_count() or 1)
         self.root_loader = None
         if root_dataset is not None:
             self.root_loader = DataLoader(

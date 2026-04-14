@@ -27,6 +27,7 @@ import argparse
 import os
 import sys
 import warnings
+from typing import Optional
 
 import pandas as pd
 
@@ -38,7 +39,7 @@ from scl.experiments.eg4_generalization import run_eg4a, run_eg4b, run_eg4c
 from scl.experiments.eg5_ablation import run_eg5a, run_eg5b, run_eg5c, run_eg5d, run_eg5e
 
 
-def resolve_device(device: str, gpu: int | None = None) -> str:
+def resolve_device(device: str, gpu: Optional[int] = None) -> str:
     """
     Resolve the compute device string, with automatic GPU selection when needed.
 
@@ -172,7 +173,10 @@ def main():
     out = args.output_dir
 
     # Set CUDA memory allocator config to reduce fragmentation before any
-    # CUDA context is created.
+    # CUDA context is created.  512 MB is a practical upper bound on the
+    # largest single allocation in this workload (smash tensors, gradient
+    # vectors); smaller blocks are split more aggressively, keeping the
+    # remaining free space contiguous for subsequent allocations.
     if device.startswith("cuda") and "PYTORCH_CUDA_ALLOC_CONF" not in os.environ:
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
 
