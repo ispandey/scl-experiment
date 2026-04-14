@@ -21,6 +21,39 @@ from scl.models.mobilenet import build_mobilenetv2_split
 from scl.training.federated import FederatedTrainer
 
 
+# ---------------------------------------------------------------------------
+# Device helpers
+# ---------------------------------------------------------------------------
+
+def _is_cuda(device: str) -> bool:
+    return device.startswith("cuda")
+
+
+def _pin_memory(device: str) -> bool:
+    """Return True when DataLoaders should pin host memory for fast H→D transfer."""
+    return _is_cuda(device)
+
+
+def _num_workers() -> int:
+    """Number of DataLoader worker processes (bounded so we don't over-subscribe)."""
+    cpu_count = os.cpu_count() or 1
+    return min(4, cpu_count)
+
+
+def setup_cuda(device: str) -> None:
+    """
+    Apply one-time CUDA optimisations when a GPU device is selected.
+
+    - cudnn.benchmark=True:  auto-tunes convolution kernels for fixed input sizes
+                             (CIFAR/TinyImageNet batches are constant-size).
+    - cudnn.deterministic:   left at its default (False) for maximum throughput;
+                             reproducibility is controlled via set_seed().
+    """
+    if not _is_cuda(device):
+        return
+    torch.backends.cudnn.benchmark = True
+
+
 def set_seed(seed: int):
     import random, numpy as np
     random.seed(seed)
@@ -65,12 +98,18 @@ def build_trainer(
     seed: int = 0,
 ) -> Tuple[FederatedTrainer, DataLoader]:
     """Build a fully-configured FederatedTrainer for one experiment cell."""
+    setup_cuda(device)
     set_seed(seed)
 
     nc = num_classes(dataset_name)
     train_ds = get_dataset(dataset_name, train=True)
     test_ds = get_dataset(dataset_name, train=False)
-    test_loader = DataLoader(test_ds, batch_size=128, shuffle=False)
+    pin = _pin_memory(device)
+    nw = _num_workers()
+    test_loader = DataLoader(
+        test_ds, batch_size=128, shuffle=False,
+        num_workers=nw, pin_memory=pin,
+    )
 
     client_datasets = partition_dataset(
         train_ds, num_clients, partition, num_classes=nc, seed=seed

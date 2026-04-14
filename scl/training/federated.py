@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -21,6 +22,10 @@ from scl.metrics.robustness import (
     compute_gradient_bias_norm,
 )
 from scl.training.scheduler import WarmupCosineScheduler
+
+
+def _is_cuda_device(device: str) -> bool:
+    return device.startswith("cuda")
 
 
 class FederatedTrainer:
@@ -100,9 +105,14 @@ class FederatedTrainer:
         )
 
         # Root loader for FLTrust
+        self._pin_memory = _is_cuda_device(device)
+        self._num_workers = min(4, os.cpu_count() or 1)
         self.root_loader = None
         if root_dataset is not None:
-            self.root_loader = DataLoader(root_dataset, batch_size=32, shuffle=True)
+            self.root_loader = DataLoader(
+                root_dataset, batch_size=32, shuffle=True,
+                num_workers=self._num_workers, pin_memory=self._pin_memory,
+            )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -125,6 +135,8 @@ class FederatedTrainer:
             batch_size=self.batch_size,
             shuffle=True,
             drop_last=True,
+            num_workers=self._num_workers,
+            pin_memory=self._pin_memory,
         )
 
     # ------------------------------------------------------------------
@@ -132,6 +144,18 @@ class FederatedTrainer:
     # ------------------------------------------------------------------
 
     def run_round(self, round_t: int, snr_db: float) -> RoundMetrics:
+        try:
+            return self._run_round_impl(round_t, snr_db)
+        except torch.cuda.OutOfMemoryError as exc:
+            if _is_cuda_device(self.device):
+                torch.cuda.empty_cache()
+            raise RuntimeError(
+                f"CUDA out-of-memory at round {round_t} on {self.device}. "
+                "Try reducing --batch_size, using a smaller split_layer, or "
+                "selecting a GPU with more free memory (see --gpu / --device)."
+            ) from exc
+
+    def _run_round_impl(self, round_t: int, snr_db: float) -> RoundMetrics:
         t_start = time.time()
         metrics = RoundMetrics(round_t=round_t)
 
@@ -371,6 +395,10 @@ class FederatedTrainer:
         metrics.bytes_transmitted = int(sum(bytes_txs) / len(bytes_txs)) if bytes_txs else 0
         metrics.compression_ratio = self.compression_ratio
         metrics.wall_clock_sec = time.time() - t_start
+
+        # Release any temporary CUDA tensors accumulated during this round.
+        if _is_cuda_device(self.device):
+            torch.cuda.empty_cache()
 
         return metrics
 
