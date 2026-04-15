@@ -1,3 +1,5 @@
+LICENSE
+README.md
 setup.py
 scl/__init__.py
 scl/config.py

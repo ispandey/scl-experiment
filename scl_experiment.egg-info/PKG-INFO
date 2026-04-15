@@ -2,3 +2,4 @@ Metadata-Version: 2.1
 Name: scl-experiment
 Version: 0.1.0
 Requires-Python: >=3.8
+License-File: LICENSE

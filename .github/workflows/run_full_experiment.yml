@@ -1,0 +1,93 @@
+name: Run Full SCL Experiment (GPU)
+
+on:
+  workflow_dispatch:          # trigger manually from the GitHub Actions UI
+    inputs:
+      exp:
+        description: 'Experiment group to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - eg1
+          - eg2
+          - eg3
+          - eg4
+          - eg5
+      runner:
+        description: 'Runner label (use "gpu" for GPU runner, "ubuntu-latest" for CPU fallback)'
+        required: false
+        default: 'gpu'
+  push:
+    branches: [main]          # also auto-runs when this workflow file lands on main
+
+jobs:
+  run-experiment:
+    name: Full experiment on GPU
+    # Default: GitHub's NVIDIA T4 larger runner (requires "larger runners" with GPU
+    # enabled on the org/repo).  Override via the `runner` dispatch input or change
+    # the default below to `ubuntu-latest` for a CPU-only free-tier run.
+    runs-on: ${{ github.event.inputs.runner || 'gpu' }}
+    permissions:
+      contents: read
+
+    timeout-minutes: 720      # 12-hour hard cap
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Python setup ──────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ── 3. Install CUDA-enabled PyTorch + other deps ──────────────────
+      # Install PyTorch with CUDA 12.1 support first (avoids the CPU-only
+      # wheel that `pip install -r requirements.txt` might pull in when no
+      # explicit index URL is set).
+      - name: Install PyTorch (CUDA 12.1)
+        run: |
+          pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+      - name: Install remaining dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -e .
+
+      # ── 4. Confirm GPU visibility ─────────────────────────────────────
+      - name: Verify GPU
+        run: |
+          nvidia-smi
+          python - <<'EOF'
+          import torch
+          print(f"CUDA available : {torch.cuda.is_available()}")
+          if torch.cuda.is_available():
+              for i in range(torch.cuda.device_count()):
+                  p = torch.cuda.get_device_properties(i)
+                  free, total = torch.cuda.mem_get_info(i)
+                  print(f"  GPU {i}: {p.name}  total={total/1e9:.1f} GB  free={free/1e9:.1f} GB")
+          EOF
+
+      # ── 5. Run the full experiment suite ─────────────────────────────
+      - name: Run full experiment (${{ github.event.inputs.exp || 'all' }})
+        run: |
+          python runner.py \
+            --exp ${{ github.event.inputs.exp || 'all' }} \
+            --device cuda \
+            --mixed_precision \
+            --output_dir results
+
+      # ── 6. Upload results ─────────────────────────────────────────────
+      - name: Upload results artifact
+        if: always()          # upload even if the run partially failed
+        uses: actions/upload-artifact@v4
+        with:
+          name: scl-results-${{ github.event.inputs.exp || 'all' }}-${{ github.run_id }}
+          path: results/
+          retention-days: 30
