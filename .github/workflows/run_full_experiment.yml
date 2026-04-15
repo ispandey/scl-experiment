@@ -15,14 +15,20 @@ on:
           - eg3
           - eg4
           - eg5
+      runner:
+        description: 'Runner label (use "gpu" for GPU runner, "ubuntu-latest" for CPU fallback)'
+        required: false
+        default: 'gpu'
+  push:
+    branches: [main]          # also auto-runs when this workflow file lands on main
 
 jobs:
   run-experiment:
     name: Full experiment on GPU
-    # GitHub's NVIDIA T4 larger runner (requires "larger runners" enabled on the org/repo).
-    # If your plan only includes standard runners, change this to `ubuntu-latest`
-    # (the code will automatically fall back to CPU).
-    runs-on: gpu
+    # Default: GitHub's NVIDIA T4 larger runner (requires "larger runners" with GPU
+    # enabled on the org/repo).  Override via the `runner` dispatch input or change
+    # the default below to `ubuntu-latest` for a CPU-only free-tier run.
+    runs-on: ${{ github.event.inputs.runner || 'gpu' }}
 
     timeout-minutes: 720      # 12-hour hard cap
 
