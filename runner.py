@@ -4,25 +4,28 @@ SCL Experiment Runner
 =====================
 Implements the JSAC-grade SCL experiment suite from jsac_experiment_design.md.
 
+Hyperparameter priority (highest → lowest):
+    CLI flags  >  config.yaml  >  code defaults (scl/config.py)
+
 Usage examples
 --------------
 Dry run (reduced rounds/seeds to validate pipeline):
     python runner.py --exp eg1 --device cpu --dry_run
 
-Full EG-1 (requires real datasets):
-    python runner.py --exp eg1 --device cuda --output_dir results/
+Load hyperparameters from YAML (recommended on Colab/Kaggle/Lightning AI):
+    python runner.py --exp eg3 --config config.yaml
 
-Full EG-1 on GPU with mixed precision (recommended for Colab/Kaggle):
+Full EG-1 on GPU with mixed precision:
     python runner.py --exp eg1 --device cuda --mixed_precision --output_dir results/
 
 Full EG-1 on a specific GPU (e.g. GPU index 2):
     python runner.py --exp eg1 --device cuda --gpu 2 --output_dir results/
 
-Full EG-3A robustness matrix:
-    python runner.py --exp eg3a --device cuda --output_dir results/
+Override individual hyperparameters at the CLI:
+    python runner.py --exp eg3a --config config.yaml --batch_size 128 --lr 0.05
 
 All experiments:
-    python runner.py --exp all --device cuda --mixed_precision --output_dir results/
+    python runner.py --exp all --config config.yaml --device cuda
 """
 from __future__ import annotations
 
@@ -30,7 +33,7 @@ import argparse
 import os
 import sys
 import warnings
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
@@ -135,6 +138,7 @@ def parse_args():
         description="SCL JSAC Experiment Runner",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    # ── Experiment selection ──────────────────────────────────────────────
     p.add_argument(
         "--exp",
         required=True,
@@ -147,24 +151,45 @@ def parse_args():
         ],
         help="Experiment group to run.",
     )
-    p.add_argument("--output_dir", default="results", help="Root output directory.")
+    # ── Infrastructure ────────────────────────────────────────────────────
+    p.add_argument("--output_dir", default=None,
+                   help="Root output directory (default: 'results' or config.yaml value).")
     p.add_argument(
-        "--device", default="cpu",
-        help="Compute device: 'cpu', 'cuda' (auto-select GPU), or 'cuda:N'.",
+        "--device", default=None,
+        help="Compute device: 'cpu', 'cuda' (auto-select GPU), or 'cuda:N'. "
+             "Falls back to config.yaml 'device', then 'cpu'.",
     )
     p.add_argument(
         "--gpu", type=int, default=None,
         help="GPU index to use (overrides the index in --device). "
              "Ignored when --device cpu.",
     )
+    p.add_argument(
+        "--config", type=str, default=None,
+        help="Path to a YAML config file (e.g. config.yaml). "
+             "Values override code defaults; CLI flags override the YAML.",
+    )
+    # ── Run control ───────────────────────────────────────────────────────
     p.add_argument("--dry_run", action="store_true",
                    help="Minimal run (2 rounds, 1 seed, 2 SNR) to validate pipeline.")
     p.add_argument("--num_rounds", type=int, default=None,
                    help="Override number of rounds (useful for quick tests).")
     p.add_argument("--num_seeds", type=int, default=None,
                    help="Override number of seeds.")
+    # ── Hyperparameters (apply to all experiments unless overridden in YAML) ─
+    p.add_argument("--batch_size", type=int, default=None,
+                   help="Mini-batch size per client.")
+    p.add_argument("--lr", type=float, default=None,
+                   help="Initial SGD learning rate.")
+    p.add_argument("--num_clients", type=int, default=None,
+                   help="Total number of federated clients.")
+    p.add_argument("--malicious_fraction", type=float, default=None,
+                   help="Fraction of clients that are Byzantine (0.0 – 0.5).")
+    p.add_argument("--split_layer", type=int, default=None, choices=[1, 2, 3],
+                   help="ResNet-18 split point (1=early, 2=mid, 3=late).")
+    # ── GPU / precision ───────────────────────────────────────────────────
     p.add_argument(
-        "--mixed_precision", action="store_true",
+        "--mixed_precision", action="store_true", default=None,
         help=(
             "Enable automatic mixed-precision (AMP) training for GPU speedup. "
             "Uses bfloat16 on Ampere+ GPUs (A100, RTX 30/40 series), float16 "
@@ -187,14 +212,71 @@ def _subdir(output_dir: str, name: str) -> str:
     return os.path.join(output_dir, name)
 
 
+def _load_yaml(path: str) -> Dict[str, Any]:
+    """Load a YAML file; return empty dict on failure."""
+    try:
+        import yaml
+    except ImportError:
+        warnings.warn(
+            "PyYAML is not installed; --config will be ignored. "
+            "Run: pip install PyYAML"
+        )
+        return {}
+    with open(path) as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def _apply_section(cfg, section: Dict[str, Any]) -> None:
+    """Write values from *section* dict into dataclass *cfg* (skips unknowns)."""
+    for key, val in section.items():
+        if val is not None and hasattr(cfg, key):
+            setattr(cfg, key, val)
+
+
+def _apply_cli_overrides(cfg, args) -> None:
+    """Apply explicit CLI hyperparameter flags on top of the config object."""
+    overrides = {
+        "num_rounds": args.num_rounds,
+        "num_seeds": args.num_seeds,
+        "batch_size": args.batch_size,
+        "lr": args.lr,
+        "num_clients": args.num_clients,
+        "malicious_fraction": args.malicious_fraction,
+        "split_layer": args.split_layer,
+    }
+    for attr, val in overrides.items():
+        if val is not None and hasattr(cfg, attr):
+            setattr(cfg, attr, val)
+
+
 def main():
     args = parse_args()
     dry = args.dry_run
-    device = resolve_device(args.device, args.gpu)
-    out = args.output_dir
+
+    # ── Load YAML config (if provided) ───────────────────────────────────
+    yaml_cfg: Dict[str, Any] = {}
+    if args.config:
+        yaml_cfg = _load_yaml(args.config)
+
+    # ── Resolve device (CLI > yaml > default 'cpu') ───────────────────────
+    raw_device = args.device or yaml_cfg.get("device", "cpu")
+    device = resolve_device(raw_device, args.gpu)
+
+    # ── Resolve output dir (CLI > yaml > 'results') ───────────────────────
+    out = args.output_dir or yaml_cfg.get("output_dir", "results")
+
+    # ── Resolve mixed_precision and data_root (CLI > yaml) ───────────────
+    # argparse stores None (not False) when --mixed_precision is absent because
+    # we set default=None; the yaml value fills the gap if present.
+    if args.mixed_precision:
+        mixed_precision = True
+    else:
+        mixed_precision = bool(yaml_cfg.get("mixed_precision", False))
+
+    data_root = args.data_root or yaml_cfg.get("data_root") or None
 
     # Configure dataset root and AMP before any experiment code runs.
-    set_global_opts(data_root=args.data_root, mixed_precision=args.mixed_precision)
+    set_global_opts(data_root=data_root, mixed_precision=mixed_precision)
 
     # Set CUDA memory allocator config to reduce fragmentation before any
     # CUDA context is created.  512 MB is a practical upper bound on the
@@ -205,42 +287,43 @@ def main():
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
 
     print(f"\nRunning experiment: '{args.exp}'")
+    print(f"  config           = {args.config or '(none)'}")
     print(f"  output_dir       = {out}")
     print(f"  device           = {device}")
     print(f"  dry_run          = {dry}")
-    print(f"  mixed_precision  = {args.mixed_precision}")
-    print(f"  data_root        = {args.data_root or '~/.cache/scl_data (default)'}")
+    print(f"  mixed_precision  = {mixed_precision}")
+    print(f"  data_root        = {data_root or '~/.cache/scl_data (default)'}")
     _print_device_info(device)
 
-    # ── Build configs (optionally override rounds/seeds) ─────────────────
+    # ── Build configs: code defaults → yaml section → CLI overrides ──────
     def _eg1_cfg():
         c = EG1Config()
-        if args.num_rounds: c.num_rounds = args.num_rounds
-        if args.num_seeds: c.num_seeds = args.num_seeds
+        _apply_section(c, yaml_cfg.get("eg1", {}))
+        _apply_cli_overrides(c, args)
         return c
 
     def _eg2_cfg():
         c = EG2Config()
-        if args.num_rounds: c.num_rounds = args.num_rounds
-        if args.num_seeds: c.num_seeds = args.num_seeds
+        _apply_section(c, yaml_cfg.get("eg2", {}))
+        _apply_cli_overrides(c, args)
         return c
 
     def _eg3_cfg():
         c = EG3Config()
-        if args.num_rounds: c.num_rounds = args.num_rounds
-        if args.num_seeds: c.num_seeds = args.num_seeds
+        _apply_section(c, yaml_cfg.get("eg3", {}))
+        _apply_cli_overrides(c, args)
         return c
 
     def _eg4_cfg():
         c = EG4Config()
-        if args.num_rounds: c.num_rounds = args.num_rounds
-        if args.num_seeds: c.num_seeds = args.num_seeds
+        _apply_section(c, yaml_cfg.get("eg4", {}))
+        _apply_cli_overrides(c, args)
         return c
 
     def _eg5_cfg():
         c = EG5Config()
-        if args.num_rounds: c.num_rounds = args.num_rounds
-        if args.num_seeds: c.num_seeds = args.num_seeds
+        _apply_section(c, yaml_cfg.get("eg5", {}))
+        _apply_cli_overrides(c, args)
         return c
 
     # ── Dispatch ──────────────────────────────────────────────────────────

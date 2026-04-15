@@ -1,0 +1,152 @@
+# =============================================================================
+# SCL Experiment Configuration
+# =============================================================================
+# All values here are applied on top of code defaults.
+# Explicit CLI flags always take the highest priority:
+#   CLI > config.yaml > code defaults
+#
+# Platform quick-start:
+#   Google Colab (EG-1 / EG-2):
+#     data_root: /content/data
+#     device: cuda
+#     mixed_precision: true
+#
+#   Kaggle (EG-3 / EG-4):
+#     data_root: /kaggle/working/data
+#     device: cuda
+#     mixed_precision: true
+#
+#   Lightning AI (EG-5):
+#     data_root: /teamspace/studios/this_studio/data
+#     device: cuda
+#     mixed_precision: true
+#
+# Usage:
+#   python runner.py --exp eg3 --config config.yaml
+#   python runner.py --exp all  --config config.yaml --device cuda
+# =============================================================================
+
+# ── Infrastructure ────────────────────────────────────────────────────────────
+device: cuda          # 'cpu' | 'cuda' (auto-select GPU) | 'cuda:N'
+mixed_precision: true # bfloat16 on Ampere+ (A100/RTX30+), float16 on T4/V100/P100
+output_dir: results
+data_root: null       # null → ~/.cache/scl_data; set an absolute path for platforms
+                      # e.g. /content/data  (Colab)
+                      #      /kaggle/working/data  (Kaggle)
+
+# ── EG-1: Theorem 1 & 3 Calibration ─────────────────────────────────────────
+eg1:
+  dataset: cifar10
+  partition: iid
+  arch: resnet18
+  split_layer: 2
+  channel: rayleigh
+  snr_list: [0, 5, 10, 15, 20, 25, 30]
+  attack: none
+  defense: fedavg
+  num_rounds: 100
+  num_seeds: 5
+  num_clients: 50
+  malicious_fraction: 0.0
+  batch_size: 64
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 5.0e-4
+  alpha_channel: 1.0
+
+# ── EG-2: Semantic Capacity Measurement ──────────────────────────────────────
+eg2:
+  dataset: cifar10
+  partition: iid
+  arch: resnet18
+  split_layer: 2
+  channel: rayleigh
+  snr_list: [0, 5, 10, 15, 20, 25, 30]
+  attack: none
+  num_rounds: 100
+  num_seeds: 5
+  num_clients: 50
+  malicious_fraction: 0.0
+  batch_size: 64
+  lr: 0.1
+  alpha_channel: 1.0
+
+# ── EG-3: Robustness Matrix (Very High load — recommended: Kaggle P100/T4) ──
+eg3:
+  dataset: cifar10
+  partition: iid
+  arch: resnet18
+  split_layer: 2
+  channel: rayleigh
+  snr_list: [5, 15, 25]
+  attacks:
+    - none
+    - weight_poison
+    - label_flip
+    - smash
+    - ipm
+    - minmax
+  defenses:
+    - fedavg
+    - median
+    - krum
+    - flame
+    - fltrust
+    - dnc
+    - bcbsa
+    - bcbsa_nosem
+  num_rounds: 100
+  num_seeds: 5
+  num_clients: 50
+  malicious_fraction: 0.30
+  batch_size: 64
+  lr: 0.1
+  alpha_channel: 1.0
+  # EG-3B: Byzantine fraction sweep
+  fraction_sweep: [0.10, 0.20, 0.30, 0.40, 0.50]
+
+# ── EG-4: Generalization (High load — recommended: Kaggle or Colab Pro) ──────
+eg4:
+  datasets: [cifar10, cifar100, tinyimagenet, mnist]
+  partition_types: [iid, dir05, dir01]
+  arch_list: [resnet18, mobilenetv2]
+  split_layer: 2
+  channel: rayleigh
+  snr_fixed: 15.0
+  attack: weight_poison
+  defenses: [fedavg, flame, bcbsa, fedprox]
+  num_rounds: 100
+  num_seeds: 3
+  num_clients: 50
+  malicious_fraction: 0.30
+  batch_size: 64
+  lr: 0.1
+
+# ── EG-5: Ablation & Sensitivity (Moderate — recommended: Lightning AI) ──────
+eg5:
+  dataset: cifar10
+  partition: iid
+  channel: rayleigh
+  snr_list: [5, 15, 25]
+  snr_fixed: 15.0
+  num_rounds: 100
+  num_seeds: 5
+  num_clients: 50
+  malicious_fraction: 0.30
+  batch_size: 64
+  lr: 0.1
+  # EG-5A: split-point ablation
+  split_layers: [1, 2, 3]
+  # EG-5C: BCBSA component ablation
+  bcbsa_variants:
+    - bcbsa_full
+    - bcbsa_nofid
+    - bcbsa_nodist
+    - bcbsa_nosem
+    - bcbsa_notemp
+    - flame
+  # EG-5D: IB coefficient heatmap
+  beta_sweep: [0.1, 0.5, 1.0, 2.0, 5.0]
+  lambda_sweep: [1.0e-3, 5.0e-3, 1.0e-2, 5.0e-2]
+  # EG-5E: compression ratio sweep
+  compression_sweep: [0.3, 0.5, 0.7, 0.85, 0.95]
