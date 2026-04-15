@@ -63,6 +63,7 @@ class FederatedTrainer:
         num_classes: int = 10,
         compression_ratio: float = 1.0,
         alpha_channel: float = 1.0,
+        mixed_precision: bool = False,
         # Optional small root dataset for FLTrust
         root_dataset: Optional[Dataset] = None,
     ):
@@ -81,6 +82,22 @@ class FederatedTrainer:
         self.num_classes = num_classes
         self.compression_ratio = compression_ratio
         self.alpha_channel = alpha_channel
+
+        # ── Automatic Mixed Precision (AMP) ──────────────────────────────
+        # Use bfloat16 when the GPU supports it (Ampere+/A100); fall back to
+        # float16 on older hardware (T4, V100, P100).  bf16 does not require
+        # a GradScaler because it has the same exponent range as float32.
+        # fp16 is used without a GradScaler; cross-entropy training on CIFAR
+        # is numerically stable at this scale even without loss scaling.
+        self.amp_enabled = mixed_precision and _is_cuda_device(device)
+        if self.amp_enabled:
+            self.amp_dtype = (
+                torch.bfloat16
+                if torch.cuda.is_bf16_supported()
+                else torch.float16
+            )
+        else:
+            self.amp_dtype = torch.float32
 
         # Per-client optimizers
         self.client_optimizers = [
@@ -112,6 +129,8 @@ class FederatedTrainer:
             self.root_loader = DataLoader(
                 root_dataset, batch_size=32, shuffle=True,
                 num_workers=self._num_workers, pin_memory=self._pin_memory,
+                persistent_workers=(self._num_workers > 0 and self._pin_memory),
+                prefetch_factor=(2 if self._num_workers > 0 else None),
             )
 
     # ------------------------------------------------------------------
@@ -137,6 +156,8 @@ class FederatedTrainer:
             drop_last=True,
             num_workers=self._num_workers,
             pin_memory=self._pin_memory,
+            persistent_workers=(self._num_workers > 0 and self._pin_memory),
+            prefetch_factor=(2 if self._num_workers > 0 else None),
         )
 
     # ------------------------------------------------------------------
@@ -189,7 +210,8 @@ class FederatedTrainer:
             except StopIteration:
                 continue
 
-            x, y = x.to(self.device), y.to(self.device)
+            x, y = (x.to(self.device, non_blocking=self._pin_memory),
+                    y.to(self.device, non_blocking=self._pin_memory))
 
             # Label flip attack (A2)
             if cid in self.malicious_ids and self.attack is not None:
@@ -225,7 +247,9 @@ class FederatedTrainer:
             bytes_txs.append(compute_bytes_transmitted(z_clean, self.compression_ratio))
 
             # Excess loss proxy
-            with torch.no_grad():
+            with torch.no_grad(), torch.autocast(
+                'cuda', dtype=self.amp_dtype, enabled=self.amp_enabled
+            ):
                 loss_clean = self.criterion(
                     self.server_model(z_clean.detach()), y
                 ).item()
@@ -237,8 +261,9 @@ class FederatedTrainer:
             # ---- Server forward + backward (smash grad) ----
             self.server_optimizer.zero_grad()
             z_in = z_tilde.detach().requires_grad_(True)
-            logits = self.server_model(z_in)
-            loss = self.criterion(logits, y)
+            with torch.autocast('cuda', dtype=self.amp_dtype, enabled=self.amp_enabled):
+                logits = self.server_model(z_in)
+                loss = self.criterion(logits, y)
             loss.backward()
             smash_grad = z_in.grad.detach()
             train_losses.append(loss.item())
@@ -283,14 +308,18 @@ class FederatedTrainer:
             self.server_optimizer.zero_grad()
             try:
                 xr, yr = next(iter(self.root_loader))
-                xr, yr = xr.to(self.device), yr.to(self.device)
+                (xr, yr) = (xr.to(self.device, non_blocking=self._pin_memory),
+                            yr.to(self.device, non_blocking=self._pin_memory))
                 # Use first client model as proxy encoder for root data
-                with torch.no_grad():
+                with torch.no_grad(), torch.autocast(
+                    'cuda', dtype=self.amp_dtype, enabled=self.amp_enabled
+                ):
                     zr = self.client_models[0](xr)
                     zr_tilde, _ = self.channel.forward(zr, snr_db)
                 zr_in = zr_tilde.requires_grad_(False)
-                lr_logits = self.server_model(zr_in)
-                lr_loss = self.criterion(lr_logits, yr)
+                with torch.autocast('cuda', dtype=self.amp_dtype, enabled=self.amp_enabled):
+                    lr_logits = self.server_model(zr_in)
+                    lr_loss = self.criterion(lr_logits, yr)
                 lr_loss.backward()
                 server_grad_root = torch.cat([
                     p.grad.detach().flatten()
@@ -340,9 +369,12 @@ class FederatedTrainer:
             cm.eval()
 
         correct = total = 0
-        with torch.no_grad():
+        with torch.no_grad(), torch.autocast(
+            'cuda', dtype=self.amp_dtype, enabled=self.amp_enabled
+        ):
             for x_t, y_t in self.test_loader:
-                x_t, y_t = x_t.to(self.device), y_t.to(self.device)
+                (x_t, y_t) = (x_t.to(self.device, non_blocking=self._pin_memory),
+                              y_t.to(self.device, non_blocking=self._pin_memory))
                 z_t = self.client_models[0](x_t)
                 z_t_tilde, _ = self.channel.forward(z_t, snr_db)
                 logits_t = self.server_model(z_t_tilde)
@@ -365,9 +397,14 @@ class FederatedTrainer:
         # ---- IZtildeY proxy ----
         if z_tildes and len(z_tildes) > 0:
             try:
-                with torch.no_grad():
+                with torch.no_grad(), torch.autocast(
+                    'cuda', dtype=self.amp_dtype, enabled=self.amp_enabled
+                ):
                     x_probe, y_probe = next(iter(self.test_loader))
-                    x_probe, y_probe = x_probe.to(self.device), y_probe.to(self.device)
+                    (x_probe, y_probe) = (
+                        x_probe.to(self.device, non_blocking=self._pin_memory),
+                        y_probe.to(self.device, non_blocking=self._pin_memory),
+                    )
                     z_probe = self.client_models[0](x_probe)
                     zt_probe, _ = self.channel.forward(z_probe, snr_db)
                     logits_probe = self.server_model(zt_probe)

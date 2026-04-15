@@ -29,6 +29,8 @@ jobs:
     # enabled on the org/repo).  Override via the `runner` dispatch input or change
     # the default below to `ubuntu-latest` for a CPU-only free-tier run.
     runs-on: ${{ github.event.inputs.runner || 'gpu' }}
+    permissions:
+      contents: read
 
     timeout-minutes: 720      # 12-hour hard cap
 
@@ -78,6 +80,7 @@ jobs:
           python runner.py \
             --exp ${{ github.event.inputs.exp || 'all' }} \
             --device cuda \
+            --mixed_precision \
             --output_dir results
 
       # ── 6. Upload results ─────────────────────────────────────────────

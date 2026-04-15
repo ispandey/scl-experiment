@@ -19,11 +19,10 @@ def test_synthetic_dataset(synthetic_cifar10):
     assert 0 <= y < 10
 
 
-def test_get_dataset_fallback():
-    """get_dataset should fall back gracefully when offline."""
-    ds = get_dataset("cifar10", train=True)
-    assert len(ds) > 0
-    assert hasattr(ds, "__getitem__")
+def test_get_dataset_raises_when_offline():
+    """get_dataset should raise RuntimeError (not fall back silently) when offline."""
+    with pytest.raises(RuntimeError, match="Failed to load dataset 'cifar10'"):
+        get_dataset("cifar10", train=True)
 
 
 def test_iid_partition(synthetic_cifar10):

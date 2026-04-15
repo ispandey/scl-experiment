@@ -6,11 +6,14 @@ Implements the JSAC-grade SCL experiment suite from jsac_experiment_design.md.
 
 Usage examples
 --------------
-Dry run (synthetic data, 2 rounds, 1 seed):
+Dry run (reduced rounds/seeds to validate pipeline):
     python runner.py --exp eg1 --device cpu --dry_run
 
 Full EG-1 (requires real datasets):
     python runner.py --exp eg1 --device cuda --output_dir results/
+
+Full EG-1 on GPU with mixed precision (recommended for Colab/Kaggle):
+    python runner.py --exp eg1 --device cuda --mixed_precision --output_dir results/
 
 Full EG-1 on a specific GPU (e.g. GPU index 2):
     python runner.py --exp eg1 --device cuda --gpu 2 --output_dir results/
@@ -19,7 +22,7 @@ Full EG-3A robustness matrix:
     python runner.py --exp eg3a --device cuda --output_dir results/
 
 All experiments:
-    python runner.py --exp all --device cuda --output_dir results/
+    python runner.py --exp all --device cuda --mixed_precision --output_dir results/
 """
 from __future__ import annotations
 
@@ -37,6 +40,7 @@ from scl.experiments.eg2_semantic_capacity import run_eg2
 from scl.experiments.eg3_robustness_matrix import run_eg3a, run_eg3b, run_eg3c, run_eg3d
 from scl.experiments.eg4_generalization import run_eg4a, run_eg4b, run_eg4c
 from scl.experiments.eg5_ablation import run_eg5a, run_eg5b, run_eg5c, run_eg5d, run_eg5e
+from scl.experiments._utils import set_global_opts
 
 
 def resolve_device(device: str, gpu: Optional[int] = None) -> str:
@@ -159,6 +163,23 @@ def parse_args():
                    help="Override number of rounds (useful for quick tests).")
     p.add_argument("--num_seeds", type=int, default=None,
                    help="Override number of seeds.")
+    p.add_argument(
+        "--mixed_precision", action="store_true",
+        help=(
+            "Enable automatic mixed-precision (AMP) training for GPU speedup. "
+            "Uses bfloat16 on Ampere+ GPUs (A100, RTX 30/40 series), float16 "
+            "on older hardware (T4, V100, P100). No effect on CPU."
+        ),
+    )
+    p.add_argument(
+        "--data_root", type=str, default=None,
+        help=(
+            "Root directory for dataset downloads and caching "
+            "(default: ~/.cache/scl_data). "
+            "Set to a fast local path on Colab (/content/data) or "
+            "Kaggle (/kaggle/working/data) to avoid repeated downloads."
+        ),
+    )
     return p.parse_args()
 
 
@@ -172,6 +193,9 @@ def main():
     device = resolve_device(args.device, args.gpu)
     out = args.output_dir
 
+    # Configure dataset root and AMP before any experiment code runs.
+    set_global_opts(data_root=args.data_root, mixed_precision=args.mixed_precision)
+
     # Set CUDA memory allocator config to reduce fragmentation before any
     # CUDA context is created.  512 MB is a practical upper bound on the
     # largest single allocation in this workload (smash tensors, gradient
@@ -181,9 +205,11 @@ def main():
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
 
     print(f"\nRunning experiment: '{args.exp}'")
-    print(f"  output_dir = {out}")
-    print(f"  device     = {device}")
-    print(f"  dry_run    = {dry}")
+    print(f"  output_dir       = {out}")
+    print(f"  device           = {device}")
+    print(f"  dry_run          = {dry}")
+    print(f"  mixed_precision  = {args.mixed_precision}")
+    print(f"  data_root        = {args.data_root or '~/.cache/scl_data (default)'}")
     _print_device_info(device)
 
     # ── Build configs (optionally override rounds/seeds) ─────────────────

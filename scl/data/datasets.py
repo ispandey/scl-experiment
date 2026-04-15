@@ -1,8 +1,11 @@
-"""Dataset loaders for CIFAR-10/100, TinyImageNet, MNIST, and a synthetic fallback."""
+"""Dataset loaders for CIFAR-10/100, TinyImageNet, and MNIST.
+
+SyntheticDataset is retained for unit-test use only; it is never used
+as a silent fallback during real experiment runs.
+"""
 from __future__ import annotations
 
 import os
-import warnings
 from typing import Optional
 
 import torch
@@ -119,7 +122,7 @@ _DATA_ROOT = os.path.join(os.path.expanduser("~"), ".cache", "scl_data")
 
 def get_dataset(name: str, train: bool = True, data_root: Optional[str] = None) -> Dataset:
     """
-    Load a dataset by name.  Falls back to synthetic data if download fails.
+    Load a dataset by name, downloading it automatically if needed.
 
     Args:
         name: 'cifar10' | 'cifar100' | 'tinyimagenet' | 'mnist'
@@ -128,6 +131,10 @@ def get_dataset(name: str, train: bool = True, data_root: Optional[str] = None) 
 
     Returns:
         A PyTorch Dataset with a `.targets` attribute (list of int labels).
+
+    Raises:
+        ValueError: if *name* is not a recognised dataset identifier.
+        RuntimeError: if the dataset cannot be loaded or downloaded.
     """
     root = data_root or _DATA_ROOT
     os.makedirs(root, exist_ok=True)
@@ -144,11 +151,11 @@ def get_dataset(name: str, train: bool = True, data_root: Optional[str] = None) 
     try:
         return loaders[name](root, train)
     except Exception as exc:
-        warnings.warn(
-            f"Failed to load '{name}' ({exc}). Falling back to synthetic dataset.",
-            UserWarning,
-        )
-        return _make_synthetic(name, train)
+        raise RuntimeError(
+            f"Failed to load dataset '{name}' from '{root}': {exc}\n"
+            "Ensure internet connectivity is available for automatic download, "
+            "or pre-download the dataset and point --data_root to its location."
+        ) from exc
 
 
 def _load_cifar10(root: str, train: bool) -> Dataset:

@@ -22,6 +22,34 @@ from scl.training.federated import FederatedTrainer
 
 
 # ---------------------------------------------------------------------------
+# Module-level options (set once by runner.py before any experiment runs)
+# ---------------------------------------------------------------------------
+
+_DATA_ROOT_OVERRIDE: Optional[str] = None  # overrides ~/.cache/scl_data
+_MIXED_PRECISION: bool = False             # enable AMP when True
+
+
+def set_global_opts(
+    data_root: Optional[str] = None,
+    mixed_precision: bool = False,
+) -> None:
+    """
+    Set infrastructure options that apply to all subsequent experiment runs.
+
+    Call once from runner.py before dispatching any ``run_egX`` function.
+
+    Args:
+        data_root:        Root directory for dataset downloads/cache.
+                          ``None`` uses the default (``~/.cache/scl_data``).
+        mixed_precision:  Enable automatic mixed-precision (AMP) training
+                          for GPU speedup (bf16 on Ampere+, fp16 on older).
+    """
+    global _DATA_ROOT_OVERRIDE, _MIXED_PRECISION
+    _DATA_ROOT_OVERRIDE = data_root
+    _MIXED_PRECISION = mixed_precision
+
+
+# ---------------------------------------------------------------------------
 # Device helpers
 # ---------------------------------------------------------------------------
 
@@ -97,18 +125,24 @@ def build_trainer(
     compression_ratio: float = 1.0,
     seed: int = 0,
 ) -> Tuple[FederatedTrainer, DataLoader]:
-    """Build a fully-configured FederatedTrainer for one experiment cell."""
+    """Build a fully-configured FederatedTrainer for one experiment cell.
+
+    Dataset location and mixed-precision mode are taken from the module-level
+    globals set by :func:`set_global_opts` (called once in ``runner.py``).
+    """
     setup_cuda(device)
     set_seed(seed)
 
     nc = num_classes(dataset_name)
-    train_ds = get_dataset(dataset_name, train=True)
-    test_ds = get_dataset(dataset_name, train=False)
+    train_ds = get_dataset(dataset_name, train=True, data_root=_DATA_ROOT_OVERRIDE)
+    test_ds = get_dataset(dataset_name, train=False, data_root=_DATA_ROOT_OVERRIDE)
     pin = _pin_memory(device)
     nw = _num_workers()
     test_loader = DataLoader(
         test_ds, batch_size=128, shuffle=False,
         num_workers=nw, pin_memory=pin,
+        persistent_workers=(nw > 0 and pin),
+        prefetch_factor=(2 if nw > 0 else None),
     )
 
     client_datasets = partition_dataset(
@@ -149,6 +183,7 @@ def build_trainer(
         num_classes=nc,
         compression_ratio=compression_ratio,
         alpha_channel=alpha_channel,
+        mixed_precision=_MIXED_PRECISION,
         root_dataset=root_ds,
     )
     return trainer, test_loader
