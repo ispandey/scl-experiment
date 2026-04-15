@@ -61,6 +61,7 @@ Split Federated Learning (SFL) distributes a neural network across edge clients 
 | seaborn | 0.12.0 |
 | scikit-learn | 1.2.0 |
 | tqdm | 4.65.0 |
+| PyYAML | 6.0 |
 
 ---
 
@@ -95,14 +96,17 @@ The dry-run uses 4 clients, 2 rounds, 1 seed, and 2 SNR points with synthetic da
 ### Run a single experiment group
 
 ```bash
+# Recommended: load shared hyperparameters/infrastructure from YAML
+python runner.py --exp eg3 --config config.yaml
+
 # Full EG-1: Theorem calibration (7 SNR points × 5 seeds × 100 rounds)
-python runner.py --exp eg1 --device cuda --output_dir results/
+python runner.py --exp eg1 --device cuda --mixed_precision --output_dir results/
 
 # Full EG-3A: 6 attacks × 8 defenses × 3 SNR (the robustness matrix)
-python runner.py --exp eg3a --device cuda --output_dir results/
+python runner.py --exp eg3a --config config.yaml --gpu 0 --output_dir results/
 
 # All five experiment groups sequentially
-python runner.py --exp all --device cuda --output_dir results/
+python runner.py --exp all --config config.yaml --device cuda --data_root /content/data
 ```
 
 ### CLI reference
@@ -111,13 +115,26 @@ python runner.py --exp all --device cuda --output_dir results/
 python runner.py --help
 
   --exp          {eg1,eg2,eg3a,eg3b,eg3c,eg3d,eg3,eg4a,eg4b,eg4c,eg4,
-                  eg5a,eg5b,eg5c,eg5d,eg5e,eg5,all}
-  --output_dir   Root directory for results  [default: results]
-  --device       cpu or cuda                 [default: cpu]
+                   eg5a,eg5b,eg5c,eg5d,eg5e,eg5,all}
+  --config       YAML config file (recommended)
+  --output_dir   Root directory for results (CLI > YAML > code default)
+  --device       cpu, cuda (auto-select), or cuda:N
+  --gpu          Explicit GPU index override
   --dry_run      Minimal run to validate the pipeline
   --num_rounds   Override number of rounds
   --num_seeds    Override number of random seeds
+  --batch_size   Override mini-batch size
+  --lr           Override learning rate
+  --num_clients  Override federated client count
+  --malicious_fraction  Override Byzantine fraction
+  --split_layer  Override split point for ResNet-18
+  --mixed_precision  Enable AMP on GPU
+  --data_root    Dataset cache/download root (default: ~/.cache/scl_data)
 ```
+
+Hyperparameter precedence is:
+
+`CLI flags  >  config.yaml  >  code defaults (scl/config.py)`
 
 ---
 
@@ -126,6 +143,7 @@ python runner.py --help
 ```
 scl-experiment/
 ├── runner.py                    # CLI entry point
+├── config.yaml                  # Recommended runtime configuration (YAML)
 ├── setup.py
 ├── requirements.txt
 ├── jsac_experiment_design.md    # Full experiment specification
@@ -442,6 +460,17 @@ If you use this code or experimental design in your work, please cite:
 ---
 
 ## Changelog
+
+### 2026-04-15
+
+- **`runner.py` — config-driven and platform-friendly execution flow.**  
+  Added YAML-backed configuration (`--config`) with explicit precedence **CLI > config.yaml > code defaults**, plus CLI overrides for key hyperparameters (`--batch_size`, `--lr`, `--num_clients`, `--malicious_fraction`, `--split_layer`).
+
+- **`runner.py` — GPU/precision/data runtime controls.**  
+  Added `--gpu` explicit GPU selection, automatic best-free-memory GPU selection for bare `--device cuda`, AMP toggle via `--mixed_precision`, and dataset cache override via `--data_root`.
+
+- **`scl/defenses/krum.py` — vectorized Multi-Krum implementation.**  
+  Multi-Krum score computation is now fully tensorized with `torch.cdist` + `torch.topk`, keeping the full distance/scoring path on-device (CPU/GPU) and removing Python per-row sorting loops.
 
 ### 2026-04-14
 
